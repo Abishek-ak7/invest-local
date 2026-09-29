@@ -18,17 +18,20 @@
         <p class="eyebrow">PRIVATE &amp; OFFLINE</p>
         <h1 id="page-title">Home</h1>
       </div>
-      <button class="icon-button" id="quick-add-button" type="button" aria-label="Add new item">＋</button>
+      <div class="topbar-actions">
+        <button class="icon-button theme-button" id="theme-toggle-button" type="button" aria-label="Switch to dark theme">🌙</button>
+        <button class="icon-button" id="quick-add-button" type="button" aria-label="Add new item">＋</button>
+      </div>
     </header>
 
     <main id="main-content" tabindex="-1"></main>
 
     <nav class="bottom-nav" aria-label="Main navigation">
-      <button class="nav-item active" data-route="home" type="button"><span>⌂</span>Home</button>
-      <button class="nav-item" data-route="investments" type="button"><span>◒</span>Investments</button>
-      <button class="nav-item" data-route="expenses" type="button"><span>↓</span>Expenses</button>
-      <button class="nav-item" data-route="accounts" type="button"><span>▣</span>Accounts</button>
-      <button class="nav-item" data-route="more" type="button"><span>•••</span>More</button>
+      <button class="nav-item active" data-route="home" type="button"><span aria-hidden="true">🏠</span>Home</button>
+      <button class="nav-item" data-route="investments" type="button"><span aria-hidden="true">📊</span>Investments</button>
+      <button class="nav-item" data-route="expenses" type="button"><span aria-hidden="true">🧾</span>Expenses</button>
+      <button class="nav-item" data-route="accounts" type="button"><span aria-hidden="true">🏦</span>Accounts</button>
+      <button class="nav-item" data-route="more" type="button"><span aria-hidden="true">🧭</span>More</button>
     </nav>
   </div>
 

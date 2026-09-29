@@ -109,6 +109,11 @@ button {
   font-size: 1.55rem;
 }
 
+.topbar-actions {
+  display: flex;
+  gap: 0.55rem;
+}
+
 .eyebrow,
 .section-label {
   margin: 0 0 0.25rem;
@@ -134,6 +139,13 @@ button {
 .icon-button.ghost {
   background: transparent;
   color: var(--muted);
+}
+
+.theme-button {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 1.2rem;
 }
 
 main {
@@ -265,6 +277,21 @@ main {
 
 .list-main {
   min-width: 0;
+}
+
+.entity-icon {
+  display: grid;
+  width: 2.5rem;
+  height: 2.5rem;
+  flex: 0 0 2.5rem;
+  place-items: center;
+  border-radius: 12px;
+  background: var(--surface-2);
+  font-size: 1.35rem;
+}
+
+.more-menu-icon {
+  background: var(--accent-soft);
 }
 
 .list-main strong,
@@ -415,6 +442,76 @@ label > span {
   grid-column: 1 / -1;
 }
 
+.choice-field {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.choice-field legend {
+  margin-bottom: 0.45rem;
+  color: var(--text);
+  font-size: 0.82rem;
+  font-weight: 650;
+}
+
+.choice-list {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.choice-option {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  align-items: center;
+  min-height: 3.4rem;
+  padding: 0.65rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.choice-option:has(input:checked) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+.choice-option input {
+  width: 1.1rem;
+  min-height: 1.1rem;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.choice-icon {
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  place-items: center;
+  border-radius: 10px;
+  background: var(--surface-2);
+  font-size: 1.15rem;
+}
+
+.choice-label {
+  min-width: 0;
+  font-size: 0.92rem;
+}
+
+.choice-check {
+  color: transparent;
+  font-weight: 800;
+}
+
+.choice-option:has(input:checked) .choice-check {
+  color: var(--accent);
+}
+
 .empty-state {
   padding: 1.5rem 0.5rem;
   color: var(--muted);
@@ -424,6 +521,131 @@ label > span {
 .allocation-wrap {
   display: grid;
   gap: 1.2rem;
+}
+
+.allocation-comparison {
+  display: grid;
+  gap: 1rem;
+}
+
+.allocation-panel {
+  display: grid;
+  min-width: 0;
+  gap: 1.2rem;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface-2);
+}
+
+.allocation-panel h3 {
+  margin: 0;
+  text-align: center;
+}
+
+.allocation-total {
+  margin: -0.7rem 0 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+.allocation-bars {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.allocation-bar-row {
+  min-width: 0;
+}
+
+.allocation-bar-label {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.8rem;
+}
+
+.allocation-bar-label strong {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.allocation-progress {
+  height: 0.5rem;
+  margin: 0.4rem 0 0;
+  background: var(--surface);
+}
+
+.allocation-variance {
+  display: grid;
+  gap: 0.9rem;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface-2);
+}
+
+.allocation-variance .section-header,
+.allocation-variance h3,
+.allocation-help {
+  margin: 0;
+}
+
+.allocation-help {
+  margin-top: 0.2rem;
+  font-size: 0.78rem;
+}
+
+.allocation-variance-list {
+  display: grid;
+  gap: 1rem;
+}
+
+.allocation-variance-row {
+  display: grid;
+  gap: 0.45rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.allocation-variance-row:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.allocation-variance-heading {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.paired-bar-row {
+  display: grid;
+  grid-template-columns: 3.25rem minmax(0, 1fr) 3.2rem;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.paired-bar-row strong {
+  color: var(--text);
+  text-align: right;
+}
+
+.paired-progress {
+  height: 0.5rem;
+  margin: 0;
+  background: var(--surface);
+}
+
+.paired-progress .target-bar {
+  border: 1px solid var(--accent);
+  background: var(--accent-soft);
 }
 
 .donut {
@@ -444,7 +666,7 @@ label > span {
   border-radius: 50%;
   background: var(--surface);
   color: var(--muted);
-  content: "Allocation";
+  content: attr(data-label);
   font-size: 0.78rem;
   font-weight: 700;
 }
@@ -481,6 +703,80 @@ label > span {
   height: 100%;
   border-radius: inherit;
   background: var(--accent);
+}
+
+.liability-summary {
+  margin-bottom: 1rem;
+}
+
+.liability-grid {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.liability-card {
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface-2);
+}
+
+.liability-card .section-header {
+  margin-bottom: 0.75rem;
+}
+
+.liability-card h3,
+.liability-subtitle,
+.liability-dates,
+.liability-notes {
+  margin: 0;
+}
+
+.liability-subtitle,
+.liability-dates,
+.liability-notes,
+.liability-progress-label {
+  font-size: 0.8rem;
+}
+
+.liability-balance strong {
+  font-size: 1.15rem;
+}
+
+.liability-progress-label {
+  color: var(--muted);
+}
+
+.liability-details {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.liability-details div {
+  min-width: 0;
+}
+
+.liability-details span,
+.liability-details strong {
+  display: block;
+}
+
+.liability-details span {
+  margin-bottom: 0.2rem;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.liability-dates,
+.liability-notes {
+  margin-top: 0.85rem;
+}
+
+.liability-notes {
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--border);
 }
 
 .table-wrap {
@@ -708,7 +1004,23 @@ dialog::backdrop {
     align-items: center;
   }
 
+  .allocation-comparison {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .allocation-variance {
+    grid-column: 1 / -1;
+  }
+
+  .allocation-variance-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .form-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .liability-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 

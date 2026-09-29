@@ -41,20 +41,79 @@ export function monthlyRemaining(transactions, month) {
 
 export function netWorth(accounts, investments, liabilities) {
   const accountValue = accounts.reduce((total, account) => total + number(account.balance), 0);
-  const liabilityValue = liabilities.reduce((total, liability) => total + number(liability.amount), 0);
+  const liabilityValue = liabilities.reduce((total, liability) => total + liabilityValues(liability).remainingAmount, 0);
   return accountValue + totalCurrentValue(investments) - liabilityValue;
 }
 
+export function liabilityValues(liability) {
+  const principalAmount = Math.max(
+    number(liability.principalAmount) || number(liability.totalAmount) || number(liability.amount),
+    0
+  );
+  const paidAmount = Math.max(number(liability.paidAmount), 0);
+  const annualInterestRate = Math.max(number(liability.interestRate), 0);
+  const durationMonths = Math.max(Math.trunc(number(liability.durationMonths)), 0);
+  const interestMethod = liability.interestMethod === "Fixed" ? "Fixed" : "Reducing";
+  const monthlyRate = annualInterestRate / 1200;
+  let monthlyPayment = Math.max(number(liability.monthlyPayment), 0);
+  let totalPayable = Math.max(number(liability.totalAmount) || principalAmount, principalAmount);
+
+  if (durationMonths > 0) {
+    if (interestMethod === "Fixed") {
+      const fixedInterest = principalAmount * (annualInterestRate / 100) * (durationMonths / 12);
+      totalPayable = principalAmount + fixedInterest;
+      monthlyPayment = totalPayable / durationMonths;
+    } else {
+      monthlyPayment = monthlyRate > 0
+        ? principalAmount * monthlyRate * ((1 + monthlyRate) ** durationMonths) /
+          (((1 + monthlyRate) ** durationMonths) - 1)
+        : principalAmount / durationMonths;
+      totalPayable = monthlyPayment * durationMonths;
+    }
+  }
+
+  const totalInterest = Math.max(totalPayable - principalAmount, 0);
+  const remainingAmount = Math.max(totalPayable - paidAmount, 0);
+
+  return {
+    principalAmount,
+    interestMethod,
+    totalAmount: totalPayable,
+    totalPayable,
+    totalInterest,
+    paidAmount,
+    remainingAmount,
+    monthlyPayment,
+    percentage: totalPayable > 0 ? Math.min((paidAmount / totalPayable) * 100, 100) : 0,
+    paymentsRemaining: monthlyPayment > 0 ? Math.ceil(remainingAmount / monthlyPayment) : 0
+  };
+}
+
 export function assetAllocation(investments, categories) {
-  const total = totalCurrentValue(investments);
-  return categories
-    .filter((category) => category.group === "investment")
-    .map((category) => {
-      const value = investments
+  const investmentCategories = categories.filter((category) => category.group === "investment");
+  const targetTotal = investmentCategories.reduce((sum, category) => sum + number(category.targetAmount), 0);
+  const chartColors = ["#176b5b", "#2f80ed", "#7b61ff", "#e0a100", "#b56b00", "#00a884", "#e76f51", "#d14d72", "#77817d"];
+  const categoryValues = investmentCategories.map((category) => {
+    const holdingValue = investments
         .filter((investment) => investment.categoryId === category.id)
         .reduce((sum, investment) => sum + number(investment.currentValue), 0);
-      const actual = total > 0 ? (value / total) * 100 : 0;
-      return { ...category, value, actual, difference: actual - number(category.target) };
+    const value = Object.hasOwn(category, "actualAmount") ? number(category.actualAmount) : holdingValue;
+    return { category, value };
+  });
+  const actualTotal = categoryValues.reduce((sum, item) => sum + item.value, 0);
+
+  return categoryValues
+    .map(({ category, value }, index) => {
+      const actual = actualTotal > 0 ? (value / actualTotal) * 100 : 0;
+      const target = targetTotal > 0 ? (number(category.targetAmount) / targetTotal) * 100 : 0;
+      return {
+        ...category,
+        color: chartColors[index % chartColors.length],
+        target,
+        value,
+        actual,
+        difference: actual - target
+      };
     });
 }
 

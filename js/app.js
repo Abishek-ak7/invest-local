@@ -14,6 +14,7 @@ import {
   assetAllocation,
   goalProgress,
   investmentValues,
+  liabilityValues,
   monthlyIncome,
   monthlyInvestment,
   monthlyRemaining,
@@ -34,6 +35,7 @@ const dialogBody = document.querySelector("#dialog-body");
 const dialogSave = document.querySelector("#dialog-save");
 const toastElement = document.querySelector("#toast");
 const backupInput = document.querySelector("#backup-file-input");
+const themeToggleButton = document.querySelector("#theme-toggle-button");
 
 const storeNames = STORES.filter((name) => name !== "settings");
 const state = {
@@ -58,6 +60,7 @@ let toastTimer;
 const routeTitles = {
   home: "Home",
   investments: "Investments",
+  "investment-categories": "Investment Categories",
   expenses: "Expenses",
   accounts: "Accounts",
   more: "More",
@@ -66,7 +69,7 @@ const routeTitles = {
   plans: "Monthly Plan",
   cards: "Cards",
   strategy: "Investment Plan",
-  networth: "Net Worth",
+  networth: "Net Worth & Liabilities",
   settings: "Settings"
 };
 
@@ -127,6 +130,18 @@ function categoryName(id) {
   return state.data.categories.find((item) => item.id === id)?.name || "Uncategorized";
 }
 
+function categoryIcon(id, fallback = "🗂️") {
+  const category = state.data.categories.find((item) => item.id === id);
+  if (category?.icon) return category.icon;
+  const name = category?.name?.toLowerCase() || "";
+  if (name.includes("credit") || name.includes("card")) return "💳";
+  if (name.includes("broker") || name.includes("stock")) return "📈";
+  if (name.includes("bank") || name.includes("saving")) return "🏦";
+  if (name.includes("wallet")) return "👛";
+  if (name.includes("cash")) return "💵";
+  return fallback;
+}
+
 function accountName(id) {
   return state.data.accounts.find((item) => item.id === id)?.name || "No account";
 }
@@ -175,6 +190,10 @@ function applyAppearance() {
     : "23, 107, 91";
   document.documentElement.style.setProperty("--accent-rgb", rgb);
   document.querySelector('meta[name="theme-color"]').content = state.settings.accent;
+  const darkTheme = state.settings.theme === "dark" ||
+    (state.settings.theme === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
+  themeToggleButton.textContent = darkTheme ? "☀️" : "🌙";
+  themeToggleButton.setAttribute("aria-label", darkTheme ? "Switch to white theme" : "Switch to dark theme");
 }
 
 async function loadState() {
@@ -221,24 +240,80 @@ function transactionList(items, limit) {
 
 function allocationMarkup() {
   const allocation = assetAllocation(state.data.investments, state.data.categories);
-  const populated = allocation.filter((item) => item.value > 0);
-  let start = 0;
-  const gradient = populated.length
-    ? populated.map((item) => {
-      const end = start + item.actual;
-      const segment = `${item.color || "#77817d"} ${start.toFixed(2)}% ${end.toFixed(2)}%`;
-      start = end;
-      return segment;
-    }).join(", ")
-    : "var(--surface-2) 0 100%";
+  const chart = (mode, title) => {
+    const percentageKey = mode === "target" ? "target" : "actual";
+    const amountKey = mode === "target" ? "targetAmount" : "value";
+    const populated = allocation.filter((item) => item[percentageKey] > 0);
+    const totalAmount = populated.reduce((sum, item) => sum + Number(item[amountKey] || 0), 0);
+    const chartDescription = populated.length
+      ? `${title}: ${populated.map((item) => `${item.name} ${item[percentageKey].toFixed(1)} percent`).join(", ")}`
+      : `${title}: no amounts entered`;
+    let start = 0;
+    const gradient = populated.length
+      ? populated.map((item) => {
+        const end = start + item[percentageKey];
+        const segment = `${item.color} ${start.toFixed(2)}% ${end.toFixed(2)}%`;
+        start = end;
+        return segment;
+      }).join(", ")
+      : "var(--border) 0 100%";
 
-  return `<div class="allocation-wrap">
-    <div class="donut" style="background: conic-gradient(${gradient})"></div>
-    <div class="legend">${allocation.map((item) => `<div class="legend-row">
-      <span class="swatch" style="background:${escapeHtml(item.color || "#77817d")}"></span>
-      <span>${escapeHtml(item.name)}</span>
-      <strong>${item.actual.toFixed(1)}%</strong>
-    </div>`).join("")}</div>
+    return `<div class="allocation-panel">
+      <h3>${title}</h3>
+      <p class="allocation-total">Total ${formatMoney(totalAmount)}</p>
+      <div class="donut" role="img" aria-label="${escapeHtml(chartDescription)}" data-label="${mode === "target" ? "Target" : "Actual"}" style="background: conic-gradient(${gradient})"></div>
+      <div class="allocation-bars">${populated.length ? populated.map((item) => `<div class="allocation-bar-row">
+        <div class="allocation-bar-label">
+          <span class="swatch" style="background:${escapeHtml(item.color)}"></span>
+          <span aria-hidden="true">${escapeHtml(item.icon || "📌")}</span>
+          <span>${escapeHtml(item.name)}</span>
+          <strong>${formatMoney(item[amountKey])} · ${item[percentageKey].toFixed(1)}%</strong>
+        </div>
+        <div class="progress allocation-progress" role="progressbar" aria-label="${escapeHtml(`${item.name} ${title.toLowerCase()}`)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${item[percentageKey].toFixed(1)}">
+          <span style="width:${item[percentageKey].toFixed(2)}%;background:${escapeHtml(item.color)}"></span>
+        </div>
+      </div>`).join("") : emptyState(`No ${mode} amounts entered.`)}</div>
+    </div>`;
+  };
+
+  const comparisonItems = allocation.filter((item) => item.target > 0 || item.actual > 0);
+  const comparison = `<div class="allocation-variance">
+    <div class="section-header">
+      <div>
+        <h3>Target vs actual comparison</h3>
+        <p class="muted allocation-help">Positive variance is above target; negative variance is below target.</p>
+      </div>
+    </div>
+    <div class="allocation-variance-list">${comparisonItems.length ? comparisonItems.map((item) => {
+      const differenceClass = Math.abs(item.difference) < 0.05 ? "" : item.difference > 0 ? "positive" : "negative";
+      return `<div class="allocation-variance-row">
+        <div class="allocation-variance-heading">
+          <span aria-hidden="true">${escapeHtml(item.icon || "📌")}</span>
+          <strong>${escapeHtml(item.name)}</strong>
+          <span class="${differenceClass}">${formatPercent(item.difference)}</span>
+        </div>
+        <div class="paired-bar-row">
+          <span>Target</span>
+          <div class="progress paired-progress" role="progressbar" aria-label="${escapeHtml(`${item.name} target allocation`)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${item.target.toFixed(1)}">
+            <span class="target-bar" style="width:${item.target.toFixed(2)}%"></span>
+          </div>
+          <strong>${item.target.toFixed(1)}%</strong>
+        </div>
+        <div class="paired-bar-row">
+          <span>Actual</span>
+          <div class="progress paired-progress" role="progressbar" aria-label="${escapeHtml(`${item.name} actual allocation`)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${item.actual.toFixed(1)}">
+            <span style="width:${item.actual.toFixed(2)}%;background:${escapeHtml(item.color)}"></span>
+          </div>
+          <strong>${item.actual.toFixed(1)}%</strong>
+        </div>
+      </div>`;
+    }).join("") : emptyState("Enter target or actual category amounts to see the comparison.")}</div>
+  </div>`;
+
+  return `<div class="allocation-comparison">
+    ${chart("target", "Target allocation")}
+    ${chart("actual", "Actual allocation")}
+    ${comparison}
   </div>`;
 }
 
@@ -321,12 +396,14 @@ function renderInvestments() {
       ${metric("Return", formatPercent(profitPercentage(state.data.investments)), totalProfit(state.data.investments) < 0 ? "negative" : "positive")}
     </section>
     <section class="card">
-      <div class="section-header"><h2>Target vs actual</h2><button class="text-button" data-route-link="settings">Edit targets</button></div>
+      <div class="section-header"><h2>Target vs actual</h2><button class="text-button" data-route-link="investment-categories">Edit targets</button></div>
       <div class="table-wrap"><table>
-        <thead><tr><th>Category</th><th>Target</th><th>Actual</th><th>Difference</th></tr></thead>
+        <thead><tr><th>Category</th><th>Target amount</th><th>Target</th><th>Actual amount</th><th>Actual</th><th>Difference</th></tr></thead>
         <tbody>${allocations.map((item) => `<tr>
           <td>${escapeHtml(item.icon || "")} ${escapeHtml(item.name)}</td>
-          <td>${Number(item.target || 0).toFixed(1)}%</td>
+          <td>${formatMoney(item.targetAmount)}</td>
+          <td>${item.target.toFixed(1)}%</td>
+          <td>${formatMoney(item.value)}</td>
           <td>${item.actual.toFixed(1)}%</td>
           <td class="${item.difference < 0 ? "negative" : "positive"}">${formatPercent(item.difference)}</td>
         </tr>`).join("")}</tbody>
@@ -454,6 +531,7 @@ function renderAccounts() {
     <section class="card">
       <div class="section-header"><h2>Your accounts</h2><button class="button primary" data-add="account">Add account</button></div>
       <div class="list">${state.data.accounts.length ? state.data.accounts.map((item) => `<div class="list-item">
+        <span class="entity-icon" aria-hidden="true">${escapeHtml(categoryIcon(item.typeId))}</span>
         <div class="list-main"><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.purpose || categoryName(item.typeId))}</small><small>Minimum ${formatMoney(item.minimumBalance)} · Target ${formatMoney(item.targetBalance)}</small></div>
         <div class="list-value"><strong class="${Number(item.balance) < 0 ? "negative" : ""}">${formatMoney(item.balance)}</strong><small>${formatMoney(item.monthlyAllocation)} / month</small></div>
         <div class="list-actions">
@@ -467,17 +545,17 @@ function renderAccounts() {
 
 function renderMore() {
   const links = [
-    ["transactions", "↕", "Transactions", "Search and manage all money movements"],
-    ["plans", "▤", "Monthly plan", "Complete monthly items and build streaks"],
-    ["strategy", "◫", "Investment plan", "Manage products, charges, tickers, and exposure"],
-    ["goals", "◎", "Financial goals", "Monitor progress toward your goals"],
-    ["cards", "▰", "Cards", "Track current and future credit cards"],
-    ["networth", "⌁", "Net worth", "Liabilities and historical snapshots"],
+    ["transactions", "💸", "Transactions", "Search and manage all money movements"],
+    ["plans", "📅", "Monthly plan", "Complete monthly items and build streaks"],
+    ["strategy", "📈", "Investment plan", "Manage products, charges, tickers, and exposure"],
+    ["goals", "🎯", "Financial goals", "Monitor progress toward your goals"],
+    ["cards", "💳", "Cards", "Track current and future credit cards"],
+    ["networth", "⚖️", "Net worth & liabilities", "Track debt, interest, payments, and history"],
     ["settings", "⚙", "Settings", "Customize appearance, categories, and data"]
   ];
   main.className = "";
   main.innerHTML = `<section class="card"><div class="list">${links.map(([route, icon, title, description]) => `<button class="list-item text-button" data-route-link="${route}">
-    <span style="font-size:1.4rem">${icon}</span>
+    <span class="entity-icon more-menu-icon" aria-hidden="true">${icon}</span>
     <span class="list-main" style="text-align:left"><strong>${title}</strong><small>${description}</small></span>
     <span>›</span>
   </button>`).join("")}</div></section>
@@ -599,6 +677,18 @@ function renderPlans() {
 
 function renderCards() {
   const current = state.data.cards.filter((card) => card.status === "Current").length;
+  const cardIcon = (card) => {
+    if (card.icon) return card.icon;
+    const details = `${card.name || ""} ${card.purpose || ""}`.toLowerCase();
+    if (details.includes("fuel")) return "⛽";
+    if (["travel", "forex", "international"].some((word) => details.includes(word))) return "✈️";
+    if (details.includes("upi")) return "📱";
+    if (details.includes("cashback")) return "💰";
+    if (["shopping", "amazon"].some((word) => details.includes(word))) return "🛍️";
+    if (["food", "dining"].some((word) => details.includes(word))) return "🍽️";
+    if (["reward", "points"].some((word) => details.includes(word))) return "🎁";
+    return "💳";
+  };
   main.className = "";
   main.innerHTML = `<section class="metric-grid">
     ${metric("Current cards", String(current))}
@@ -607,6 +697,7 @@ function renderCards() {
   <section class="card">
     <div class="section-header"><h2>Card plan</h2><button class="button primary" data-add="card">Add card</button></div>
     <div class="list">${state.data.cards.length ? state.data.cards.map((card) => `<div class="list-item">
+      <span class="entity-icon" aria-hidden="true">${escapeHtml(cardIcon(card))}</span>
       <div class="list-main"><strong>${escapeHtml(card.name)} <span class="status-badge">${escapeHtml(card.status)}</span></strong><small>${escapeHtml(card.purpose || "No purpose set")}${card.bank ? ` · ${escapeHtml(card.bank)}` : ""}</small></div>
       <div class="list-actions">
         <button class="mini-button" data-edit="card" data-id="${card.id}" aria-label="Edit ${escapeHtml(card.name)}">✎</button>
@@ -665,7 +756,12 @@ function historyChart() {
 function renderNetWorth() {
   const worth = netWorth(state.data.accounts, state.data.investments, state.data.liabilities);
   const accountValue = state.data.accounts.reduce((sum, item) => sum + Number(item.balance || 0), 0);
-  const liabilities = state.data.liabilities.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+  const liabilitySummaries = state.data.liabilities.map((item) => ({ item, values: liabilityValues(item) }));
+  const totalPayable = liabilitySummaries.reduce((sum, entry) => sum + entry.values.totalAmount, 0);
+  const totalPaid = liabilitySummaries.reduce((sum, entry) => sum + entry.values.paidAmount, 0);
+  const totalRemaining = liabilitySummaries.reduce((sum, entry) => sum + entry.values.remainingAmount, 0);
+  const totalMonthlyPayment = liabilitySummaries.reduce((sum, entry) => sum + entry.values.monthlyPayment, 0);
+  const totalInterest = liabilitySummaries.reduce((sum, entry) => sum + entry.values.totalInterest, 0);
   main.className = "";
   main.innerHTML = `<section class="card hero-card">
     <p class="eyebrow">CURRENT NET WORTH</p><p class="hero-value">${formatMoney(worth)}</p>
@@ -673,24 +769,55 @@ function renderNetWorth() {
   </section>
   <section class="card"><div class="section-header"><h2>History</h2><button class="text-button" data-action="snapshot">Save snapshot</button></div>${historyChart()}</section>
   <section class="card">
-    <div class="section-header"><div><h2>Liabilities</h2><p class="muted" style="margin:.2rem 0 0">Total ${formatMoney(liabilities)}</p></div><button class="button primary" data-add="liability">Add liability</button></div>
-    <div class="list">${state.data.liabilities.length ? state.data.liabilities.map((item) => `<div class="list-item">
-      <div class="list-main"><strong>${escapeHtml(item.name)}</strong><small>${item.notes ? escapeHtml(item.notes) : "Manual liability"}</small></div>
-      <strong class="negative">${formatMoney(item.amount)}</strong>
-      <div class="list-actions">
-        <button class="mini-button" data-edit="liability" data-id="${item.id}" aria-label="Edit liability">✎</button>
-        <button class="mini-button danger" data-delete="liability" data-id="${item.id}" aria-label="Delete liability">×</button>
+    <div class="section-header"><div><p class="section-label">DEBT TRACKER</p><h2>Liabilities</h2></div><button class="button primary" data-add="liability">Add liability</button></div>
+    <div class="metric-grid liability-summary">
+      ${metric("Total payable", formatMoney(totalPayable))}
+      ${metric("Amount paid", formatMoney(totalPaid), "positive")}
+      ${metric("Still to pay", formatMoney(totalRemaining), totalRemaining > 0 ? "negative" : "positive")}
+      ${metric("Monthly payments", formatMoney(totalMonthlyPayment))}
+      ${metric("Total interest", formatMoney(totalInterest), totalInterest > 0 ? "negative" : "")}
+    </div>
+    <div class="liability-grid">${liabilitySummaries.length ? liabilitySummaries.map(({ item, values }) => `<article class="liability-card">
+      <div class="section-header">
+        <div>
+          <h3>${escapeHtml(item.name)}</h3>
+          <p class="muted liability-subtitle">${escapeHtml(item.type || "Other")}${item.lender ? ` · ${escapeHtml(item.lender)}` : ""}</p>
+        </div>
+        <div class="list-actions">
+          <button class="mini-button" data-edit="liability" data-id="${item.id}" aria-label="Edit ${escapeHtml(item.name)}">✎</button>
+          <button class="mini-button danger" data-delete="liability" data-id="${item.id}" aria-label="Delete ${escapeHtml(item.name)}">×</button>
+        </div>
       </div>
-    </div>`).join("") : emptyState("No liabilities recorded.")}</div>
+      <div class="split-row liability-balance"><span>Remaining</span><strong class="${values.remainingAmount > 0 ? "negative" : "positive"}">${formatMoney(values.remainingAmount)}</strong></div>
+      <div class="progress" aria-label="${values.percentage.toFixed(1)}% paid"><span style="width:${values.percentage.toFixed(2)}%"></span></div>
+      <div class="split-row liability-progress-label"><small>${formatMoney(values.paidAmount)} paid</small><small>${values.percentage.toFixed(1)}%</small><small>${formatMoney(values.totalAmount)} total</small></div>
+      <div class="liability-details">
+        <div><span>Principal</span><strong>${formatMoney(values.principalAmount)}</strong></div>
+        <div><span>Interest method</span><strong>${values.interestMethod === "Fixed" ? "Fixed / flat" : "Reducing balance"}</strong></div>
+        <div><span>Annual interest</span><strong>${Number(item.interestRate || 0).toFixed(2)}%</strong></div>
+        <div><span>Total interest</span><strong>${formatMoney(values.totalInterest)}</strong></div>
+        <div><span>Calculated EMI</span><strong>${formatMoney(values.monthlyPayment)}</strong></div>
+        <div><span>Duration</span><strong>${Number(item.durationMonths || 0) ? `${Number(item.durationMonths)} months` : "Not set"}</strong></div>
+        <div><span>Payments left</span><strong>${values.paymentsRemaining || "Not set"}</strong></div>
+      </div>
+      ${item.startDate ? `<p class="muted liability-dates">Started ${formatDate(item.startDate)}${item.endDate ? ` · Due ${formatDate(item.endDate)}` : ""}</p>` : ""}
+      ${item.notes ? `<p class="liability-notes">${escapeHtml(item.notes)}</p>` : ""}
+    </article>`).join("") : emptyState("No liabilities recorded. Add a loan, credit-card balance, EMI, or other debt.")}</div>
   </section>`;
 }
 
 function categorySettings(group, title) {
   const items = state.data.categories.filter((item) => item.group === group);
+  const targetTotal = group === "investment"
+    ? items.reduce((sum, item) => sum + Number(item.targetAmount || 0), 0)
+    : 0;
+  const actualTotal = group === "investment"
+    ? items.reduce((sum, item) => sum + Number(item.actualAmount || 0), 0)
+    : 0;
   return `<section class="card">
     <div class="section-header"><h2>${escapeHtml(title)}</h2><button class="text-button" data-add-category="${group}">Add</button></div>
     ${items.map((item) => `<div class="category-row">
-      <span>${escapeHtml(item.icon || "")} ${escapeHtml(item.name)}${group === "investment" ? ` · ${Number(item.target || 0).toFixed(1)}%` : ""}${group === "expense" ? ` · ${formatMoney(item.budget)} plan` : ""}</span>
+      <span>${escapeHtml(item.icon || "")} ${escapeHtml(item.name)}${group === "investment" ? ` · Target ${formatMoney(item.targetAmount)} (${targetTotal > 0 ? ((Number(item.targetAmount || 0) / targetTotal) * 100).toFixed(1) : "0.0"}%) · Actual ${formatMoney(item.actualAmount)} (${actualTotal > 0 ? ((Number(item.actualAmount || 0) / actualTotal) * 100).toFixed(1) : "0.0"}%)` : ""}${group === "expense" ? ` · ${formatMoney(item.budget)} plan` : ""}</span>
       <div class="list-actions">
         <button class="mini-button" data-edit-category="${item.id}">✎</button>
         <button class="mini-button danger" data-delete-category="${item.id}">×</button>
@@ -721,7 +848,7 @@ function renderSettings() {
         <div class="form-grid">
           <label class="field-full"><span>Theme</span><select id="theme-setting">
             <option value="system" ${state.settings.theme === "system" ? "selected" : ""}>System</option>
-            <option value="light" ${state.settings.theme === "light" ? "selected" : ""}>Light</option>
+            <option value="light" ${state.settings.theme === "light" ? "selected" : ""}>White</option>
             <option value="dark" ${state.settings.theme === "dark" ? "selected" : ""}>Dark</option>
           </select></label>
           <label><span>Accent color</span><input type="color" id="accent-setting" value="${escapeHtml(state.settings.accent)}"></label>
@@ -746,9 +873,26 @@ function renderSettings() {
     </div>`;
 }
 
+function renderInvestmentCategories() {
+  main.className = "";
+  main.innerHTML = `
+    <section class="card">
+      <div class="section-header">
+        <div>
+          <p class="section-label">PORTFOLIO ALLOCATION</p>
+          <h2>Edit target and actual amounts</h2>
+        </div>
+        <button class="text-button" data-route-link="investments">Back</button>
+      </div>
+      <p class="muted">Only investment categories are shown here. Edit a category to update its target and actual INR amounts.</p>
+    </section>
+    ${categorySettings("investment", "Investment categories")}`;
+}
+
 const renderers = {
   home: renderHome,
   investments: renderInvestments,
+  "investment-categories": renderInvestmentCategories,
   expenses: renderExpenses,
   accounts: renderAccounts,
   more: renderMore,
@@ -764,7 +908,9 @@ const renderers = {
 function render() {
   pageTitle.textContent = routeTitles[state.route];
   document.querySelectorAll(".nav-item").forEach((item) => {
-    const activeRoute = ["transactions", "goals", "plans", "cards", "strategy", "networth", "settings"].includes(state.route) ? "more" : state.route;
+    const activeRoute = state.route === "investment-categories"
+      ? "investments"
+      : ["transactions", "goals", "plans", "cards", "strategy", "networth", "settings"].includes(state.route) ? "more" : state.route;
     item.classList.toggle("active", item.dataset.route === activeRoute);
     item.setAttribute("aria-current", item.dataset.route === activeRoute ? "page" : "false");
   });
@@ -784,6 +930,7 @@ function field(name, label, type = "text", value = "", options = {}) {
   const attributes = [
     options.required ? "required" : "",
     options.min !== undefined ? `min="${options.min}"` : "",
+    options.max !== undefined ? `max="${options.max}"` : "",
     options.step ? `step="${options.step}"` : "",
     options.placeholder ? `placeholder="${escapeHtml(options.placeholder)}"` : ""
   ].filter(Boolean).join(" ");
@@ -792,6 +939,22 @@ function field(name, label, type = "text", value = "", options = {}) {
 
 function selectField(name, label, optionsMarkup, full = false) {
   return `<label class="${full ? "field-full" : ""}"><span>${escapeHtml(label)}</span><select name="${name}">${optionsMarkup}</select></label>`;
+}
+
+function categoryChoiceField(name, label, group, selected = "") {
+  const categories = state.data.categories.filter((item) => item.group === group);
+  const selectedId = selected || categories[0]?.id || "";
+  return `<fieldset class="choice-field field-full">
+    <legend>${escapeHtml(label)}</legend>
+    <div class="choice-list">
+      ${categories.map((item) => `<label class="choice-option">
+        <input type="radio" name="${escapeHtml(name)}" value="${escapeHtml(item.id)}" ${item.id === selectedId ? "checked" : ""} required>
+        <span class="choice-icon" aria-hidden="true">${escapeHtml(categoryIcon(item.id))}</span>
+        <span class="choice-label">${escapeHtml(item.name)}</span>
+        <span class="choice-check" aria-hidden="true">✓</span>
+      </label>`).join("")}
+    </div>
+  </fieldset>`;
 }
 
 function textArea(name, label, value = "") {
@@ -876,7 +1039,7 @@ function openTransactionForm(item = {}, forcedType) {
 function openAccountForm(item = {}) {
   openDialog(item.id ? "Edit account" : "Add account", `
     ${field("name", "Account name", "text", item.name, { required: true, full: true })}
-    ${selectField("typeId", "Account type", categoryOptions("account", item.typeId))}
+    ${categoryChoiceField("typeId", "Account type", "account", item.typeId)}
     ${field("balance", "Current balance", "number", item.balance, { step: "0.01" })}
     ${field("targetBalance", "Balance expectation", "number", item.targetBalance, { min: 0, step: "0.01" })}
     ${field("minimumBalance", "Monthly minimum required", "number", item.minimumBalance, { min: 0, step: "0.01" })}
@@ -939,8 +1102,23 @@ function openPlanForm(item = {}) {
 }
 
 function openCardForm(item = {}) {
+  const icons = [
+    ["💳", "General card"],
+    ["🛍️", "Shopping"],
+    ["💰", "Cashback"],
+    ["✈️", "Travel / forex"],
+    ["📱", "UPI / mobile"],
+    ["⛽", "Fuel"],
+    ["🍽️", "Dining"],
+    ["🎁", "Rewards"],
+    ["🏦", "Bank"]
+  ];
+  const iconOptions = icons.map(([icon, label]) =>
+    `<option value="${icon}" ${item.icon === icon ? "selected" : ""}>${icon} ${label}</option>`
+  ).join("");
   openDialog(item.id ? "Edit card" : "Add card", `
     ${field("name", "Card name", "text", item.name, { required: true, full: true })}
+    ${selectField("icon", "Card icon", iconOptions)}
     ${selectField("status", "Status", selectOptions(["Current", "Future"], item.status || "Current"))}
     ${field("bank", "Linked bank", "text", item.bank)}
     ${field("purpose", "Purpose and benefits", "text", item.purpose, { full: true })}
@@ -950,6 +1128,7 @@ function openCardForm(item = {}) {
       ...item,
       id: item.id || createId("card"),
       name: formValue(formData, "name"),
+      icon: formValue(formData, "icon"),
       status: formValue(formData, "status"),
       bank: formValue(formData, "bank"),
       purpose: formValue(formData, "purpose"),
@@ -985,40 +1164,78 @@ function openProductForm(item = {}) {
 }
 
 function openLiabilityForm(item = {}) {
+  const existingValues = liabilityValues(item);
+  const types = ["Personal loan", "Home loan", "Education loan", "Vehicle loan", "Credit card", "Buy now, pay later", "Other"];
   openDialog(item.id ? "Edit liability" : "Add liability", `
     ${field("name", "Liability name", "text", item.name, { required: true, full: true })}
-    ${field("amount", "Outstanding amount", "number", item.amount, { required: true, min: 0, step: "0.01" })}
+    ${selectField("type", "Liability type", selectOptions(types, item.type || "Personal loan"))}
+    ${field("lender", "Lender", "text", item.lender)}
+    ${field("principalAmount", "Principal / amount borrowed", "number", existingValues.principalAmount || "", { required: true, min: 0.01, step: "0.01" })}
+    ${selectField("interestMethod", "Interest calculation method", `
+      <option value="Reducing" ${(item.interestMethod || "Reducing") === "Reducing" ? "selected" : ""}>Reducing balance</option>
+      <option value="Fixed" ${item.interestMethod === "Fixed" ? "selected" : ""}>Fixed / flat rate</option>
+    `)}
+    ${field("interestRate", "Annual interest rate %", "number", item.interestRate, { min: 0, max: 100, step: "0.01" })}
+    ${field("durationMonths", "Duration in months", "number", item.durationMonths, { required: true, min: 1, step: "1" })}
+    ${field("paidAmount", "Total amount paid so far", "number", existingValues.paidAmount || "", { min: 0, step: "0.01" })}
+    ${field("startDate", "Start date", "date", item.startDate)}
+    ${field("endDate", "Expected end date", "date", item.endDate)}
     ${textArea("notes", "Notes", item.notes)}
   `, async (formData) => {
-    await putOne("liabilities", {
+    const principalAmount = Number(formValue(formData, "principalAmount"));
+    const paidAmount = Number(formValue(formData, "paidAmount"));
+    const liability = {
       ...item,
       id: item.id || createId("liability"),
       name: formValue(formData, "name"),
-      amount: Number(formValue(formData, "amount")),
+      type: formValue(formData, "type"),
+      lender: formValue(formData, "lender"),
+      principalAmount,
+      paidAmount,
+      interestMethod: formValue(formData, "interestMethod"),
+      interestRate: Number(formValue(formData, "interestRate")),
+      startDate: formValue(formData, "startDate"),
+      durationMonths: Number(formValue(formData, "durationMonths")),
+      endDate: formValue(formData, "endDate"),
       notes: formValue(formData, "notes")
-    });
+    };
+    const values = liabilityValues(liability);
+    if (paidAmount > values.totalPayable) throw new Error("Amount paid cannot be greater than the calculated total payable.");
+
+    liability.monthlyPayment = values.monthlyPayment;
+    liability.totalAmount = values.totalPayable;
+    liability.amount = values.remainingAmount;
+    await putOne("liabilities", liability);
     await createNetWorthSnapshot();
   });
 }
 
 function openCategoryForm(group, item = {}) {
+  const iconExamples = {
+    investment: "Examples: ₿  📈  🪙  🏦  💰",
+    expense: "Examples: 🏠  🍽️  ✈️  🏍️  🧾",
+    account: "Examples: 🏦  📈  👛  💵  🗂️"
+  };
   openDialog(item.id ? "Edit category" : "Add category", `
     ${field("name", "Name", "text", item.name, { required: true, full: true })}
-    ${field("icon", "Icon or short symbol", "text", item.icon, { full: group !== "investment" })}
-    ${group === "investment" ? field("target", "Target allocation %", "number", item.target, { min: 0, step: "0.1" }) : ""}
+    ${field("icon", "Icon or emoji", "text", item.icon, { full: group !== "investment", placeholder: iconExamples[group] })}
+    ${group === "investment" ? field("targetAmount", "Target amount (INR)", "number", item.targetAmount, { required: true, min: 0, step: "0.01" }) : ""}
+    ${group === "investment" ? field("actualAmount", "Current actual amount (INR)", "number", item.actualAmount, { required: true, min: 0, step: "0.01" }) : ""}
     ${group === "expense" ? field("budget", "Monthly expense plan", "number", item.budget, { min: 0, step: "0.01" }) : ""}
-    ${group === "investment" || group === "expense" ? field("color", "Chart color", "color", item.color || "#176b5b") : ""}
   `, async (formData) => {
-    await putOne("categories", {
+    const category = {
       ...item,
       id: item.id || createId(`category-${group}`),
       group,
       name: formValue(formData, "name"),
       icon: formValue(formData, "icon"),
-      target: group === "investment" ? Number(formValue(formData, "target")) : undefined,
-      budget: group === "expense" ? Number(formValue(formData, "budget")) : undefined,
-      color: formValue(formData, "color") || undefined
-    });
+      targetAmount: group === "investment" ? Number(formValue(formData, "targetAmount")) : undefined,
+      actualAmount: group === "investment" ? Number(formValue(formData, "actualAmount")) : undefined,
+      budget: group === "expense" ? Number(formValue(formData, "budget")) : undefined
+    };
+    delete category.target;
+    delete category.color;
+    await putOne("categories", category);
   });
 }
 
@@ -1142,6 +1359,14 @@ document.querySelector("#quick-add-button").addEventListener("click", () => {
     transactions: "transaction"
   }[state.route] || "transaction";
   formOpeners[type]();
+});
+
+themeToggleButton.addEventListener("click", async () => {
+  const darkTheme = state.settings.theme === "dark" ||
+    (state.settings.theme === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
+  await saveSettings({ theme: darkTheme ? "light" : "dark" });
+  if (state.route === "settings") renderSettings();
+  showToast(`${darkTheme ? "White" : "Dark"} theme enabled.`);
 });
 
 main.addEventListener("click", async (event) => {
