@@ -83,11 +83,11 @@ The dashboard Liabilities card shows remaining debt and combined monthly payment
 
 Open **More → Monthly plan** to view recurring transfer or investment tasks and completion history. Edit tasks in the workbook **Plans** sheet and monthly completion records in **Plan Checks**.
 
-The check icon in the top bar displays the current completion-streak count and opens the Monthly plan view.
+The top-bar status icon displays the current pending-category count and opens the current Monthly plan view.
 
 The **This month** dashboard shows only the monthly financial totals. Pending investment-plan details are kept in **Monthly plan** instead of taking space on Home.
 
-Each pending category can be answered independently with **Already done**, **Partial amount**, or **Not needed this month**. Already done fills the remaining planned amount, Partial amount records the entered contribution while leaving the balance pending, and Not needed resolves the category without adding an investment. Categories whose actual investments already meet the plan are treated as complete automatically. The top-bar icon shows a pending symbol and pending-category count until every category is complete or resolved; it then changes to a plain tick. The same response records appear in the workbook **Plan Checks** sheet.
+Each pending category can be answered independently with **Add investment**, **Already done**, **Partial amount**, or **Not needed this month**. Add investment asks for an existing portfolio holding, creates an Investment transaction for only the missing planned amount, increases that holding's invested amount, and adds quantity using its current price when available. Changing the response reverses the generated transaction and its exact portfolio update. The other compact controls update checklist status only: Partial amount records how much was already invested while leaving the category pending, and Not needed resolves the category for the month. Categories whose actual investments already meet the plan are treated as complete automatically. The top-bar icon shows a pending symbol and pending-category count until every category is complete or resolved; it then changes to a plain tick. The selected holding is included in the workbook **Transactions** and **Plan Checks** sheets.
 
 ## Recording expenses
 

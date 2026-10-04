@@ -446,27 +446,35 @@ body.workbook-mode main {
 }
 
 .monthly-choice-controls {
-  display: grid;
-  flex: 0 1 29rem;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 0.35rem;
 }
 
 .monthly-choice-button {
-  min-height: 2.4rem;
-  padding: 0.4rem 0.55rem;
+  min-height: 2rem;
+  padding: 0.3rem 0.55rem;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--surface);
   color: var(--muted);
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   font-weight: 800;
   line-height: 1.2;
+  white-space: nowrap;
 }
 
 .monthly-choice-button.complete.selected {
   border-color: var(--positive);
   background: var(--positive);
+  color: white;
+}
+
+.monthly-choice-button.added.selected {
+  border-color: var(--accent);
+  background: var(--accent);
   color: white;
 }
 
@@ -496,7 +504,7 @@ body.workbook-mode main {
 
   .monthly-choice-controls {
     align-self: stretch;
-    grid-template-columns: 1fr;
+    justify-content: flex-start;
   }
 }
 

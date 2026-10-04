@@ -192,17 +192,42 @@ export async function recordExpense(expense) {
   return expense;
 }
 
-export async function saveMonthlyPlanResponses(month, responses, plans, transactions, currency = "INR") {
+export async function saveMonthlyPlanResponses(month, responses, plans, transactions = [], currency = "INR") {
   const database = await openDatabase();
-  const transaction = database.transaction(["planCompletions", "transactions"], "readwrite");
+  const transaction = database.transaction(["planCompletions", "transactions", "investments"], "readwrite");
   const completionStore = transaction.objectStore("planCompletions");
   const transactionStore = transaction.objectStore("transactions");
+  const investmentStore = transaction.objectStore("investments");
   const respondedAt = new Date().toISOString();
 
   for (const response of responses) {
     const categoryId = String(response.categoryId || "");
     const categoryPlans = plans.filter((plan) => String(plan.categoryId || "") === categoryId && Number(plan.amount || 0) > 0);
     const generatedId = `monthly-plan-${month}-${categoryId || "uncategorized"}`;
+    const partialAmount = Number(response.amount || 0);
+    let targetInvestment = null;
+
+    if (response.status === "Partial" && (!Number.isFinite(partialAmount) || partialAmount <= 0)) {
+      throw new Error("Partial investment amount must be greater than zero.");
+    }
+    if (response.status === "Added") {
+      targetInvestment = await requestToPromise(investmentStore.get(String(response.investmentId || "")));
+      if (!targetInvestment || String(targetInvestment.categoryId || "") !== categoryId) {
+        throw new Error("Choose a portfolio holding from this investment category.");
+      }
+    }
+
+    const previousGenerated = await requestToPromise(transactionStore.get(generatedId));
+    const previousUpdate = previousGenerated?.planResponse?.portfolioUpdate;
+    if (previousUpdate?.investmentId) {
+      const previousInvestment = await requestToPromise(investmentStore.get(previousUpdate.investmentId));
+      if (previousInvestment) {
+        previousInvestment.investedAmount = Math.max(Number(previousInvestment.investedAmount || 0) - Number(previousUpdate.investedAmount || 0), 0);
+        previousInvestment.quantity = Math.max(Number(previousInvestment.quantity || 0) - Number(previousUpdate.quantity || 0), 0);
+        investmentStore.put(previousInvestment);
+        if (targetInvestment?.id === previousInvestment.id) targetInvestment = previousInvestment;
+      }
+    }
 
     for (const plan of categoryPlans) {
       completionStore.put({
@@ -210,13 +235,14 @@ export async function saveMonthlyPlanResponses(month, responses, plans, transact
         planId: plan.id,
         month,
         status: response.status,
-        amount: response.status === "Partial" ? Number(response.amount || 0) : 0,
+        amount: response.status === "Partial" ? partialAmount : 0,
+        investmentId: response.status === "Added" ? targetInvestment.id : "",
         respondedAt,
-        completedAt: response.status === "Completed" ? respondedAt : ""
+        completedAt: ["Added", "Completed"].includes(response.status) ? respondedAt : ""
       });
     }
 
-    if (response.status === "Completed") {
+    if (response.status === "Added") {
       const planned = categoryPlans.reduce((sum, plan) => sum + Number(plan.amount || 0), 0);
       const actual = transactions
         .filter((item) => item.id !== generatedId && item.type === "Investment" && String(item.date || "").startsWith(month) && String(item.categoryId || "") === categoryId)
@@ -225,42 +251,36 @@ export async function saveMonthlyPlanResponses(month, responses, plans, transact
       if (missing > 0) {
         const [year, monthNumber] = month.split("-").map(Number);
         const day = Math.min(new Date().getDate(), new Date(year, monthNumber, 0).getDate());
+        const quoteCurrency = String(targetInvestment.currency || "INR").toUpperCase();
+        const exchangeRate = quoteCurrency === "USD" ? Number(targetInvestment.exchangeRate || 0) : 1;
+        if (exchangeRate <= 0) throw new Error("Refresh this holding's USD/INR rate before adding the investment.");
+        const investedAmount = missing / exchangeRate;
+        const currentPrice = Number(targetInvestment.currentPrice || 0);
+        const quantity = currentPrice > 0 ? investedAmount / currentPrice : 0;
+        targetInvestment.investedAmount = Number(targetInvestment.investedAmount || 0) + investedAmount;
+        targetInvestment.quantity = Number(targetInvestment.quantity || 0) + quantity;
+        investmentStore.put(targetInvestment);
         transactionStore.put({
           id: generatedId,
           type: "Investment",
           date: `${month}-${String(day).padStart(2, "0")}`,
           amount: missing,
           categoryId,
+          investmentId: targetInvestment.id,
           accountId: "",
-          description: "Monthly plan completion",
-          notes: "Added from the This month checklist.",
+          description: "Monthly plan investment",
+          notes: "Added from the Monthly plan checklist.",
           currency: String(currency || "INR").toUpperCase(),
-          planResponse: { managed: true, month, categoryId }
+          planResponse: {
+            managed: true,
+            month,
+            categoryId,
+            portfolioUpdate: { investmentId: targetInvestment.id, investedAmount, quantity }
+          }
         });
       } else {
         transactionStore.delete(generatedId);
       }
-    } else if (response.status === "Partial") {
-      const planned = categoryPlans.reduce((sum, plan) => sum + Number(plan.amount || 0), 0);
-      const manualActual = transactions
-        .filter((item) => item.id !== generatedId && item.type === "Investment" && String(item.date || "").startsWith(month) && String(item.categoryId || "") === categoryId)
-        .reduce((sum, item) => sum + Number(item.amount || 0), 0);
-      const amount = Math.min(Math.max(Number(response.amount || 0), 0), Math.max(planned - manualActual, 0));
-      if (amount <= 0) throw new Error("Partial investment amount must be greater than zero.");
-      const [year, monthNumber] = month.split("-").map(Number);
-      const day = Math.min(new Date().getDate(), new Date(year, monthNumber, 0).getDate());
-      transactionStore.put({
-        id: generatedId,
-        type: "Investment",
-        date: `${month}-${String(day).padStart(2, "0")}`,
-        amount,
-        categoryId,
-        accountId: "",
-        description: "Partial monthly plan contribution",
-        notes: "Added from the Monthly plan checklist.",
-        currency: String(currency || "INR").toUpperCase(),
-        planResponse: { managed: true, month, categoryId }
-      });
     } else {
       transactionStore.delete(generatedId);
     }
