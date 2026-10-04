@@ -1,9 +1,14 @@
 const PRICE_ENDPOINT = "https://api.twelvedata.com/price";
 const EXCHANGE_RATE_ENDPOINT = "https://api.twelvedata.com/exchange_rate";
+const MUTUAL_FUND_ENDPOINT = "https://api.mfapi.in/mf";
 const MAX_SYMBOLS_PER_REQUEST = 8;
 
 export function normalizeMarketSymbol(value) {
   return String(value || "").trim().toUpperCase();
+}
+
+export function isMutualFundSchemeCode(value) {
+  return /^\d{6}$/.test(normalizeMarketSymbol(value));
 }
 
 export async function fetchLatestPrices(symbols, apiKey) {
@@ -48,4 +53,29 @@ export async function fetchUsdInrRate(apiKey) {
     throw new Error(payload?.message || "The live USD to INR rate is unavailable right now.");
   }
   return rate;
+}
+
+export async function fetchMutualFundNavs(schemeCodes) {
+  const requestedCodes = [...new Set(schemeCodes.map(normalizeMarketSymbol).filter(isMutualFundSchemeCode))];
+  if (!requestedCodes.length) return new Map();
+
+  const results = await Promise.all(requestedCodes.map(async (schemeCode) => {
+    try {
+      const response = await fetch(`${MUTUAL_FUND_ENDPOINT}/${encodeURIComponent(schemeCode)}/latest`, {
+        headers: { Accept: "application/json" },
+        referrerPolicy: "no-referrer"
+      });
+      const payload = await response.json().catch(() => null);
+      const latest = payload?.data?.[0];
+      const price = Number(latest?.nav);
+      if (!response.ok || payload?.status !== "SUCCESS" || !Number.isFinite(price) || price <= 0) return null;
+      return [schemeCode, { price, date: latest.date || "", name: payload.meta?.scheme_name || "" }];
+    } catch {
+      return null;
+    }
+  }));
+
+  const navs = new Map(results.filter(Boolean));
+  if (!navs.size) throw new Error("Mutual-fund NAVs are unavailable right now. Check the AMFI scheme codes.");
+  return navs;
 }

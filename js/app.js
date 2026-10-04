@@ -28,7 +28,7 @@ import {
   totalInvested,
   totalProfit
 } from "./calculations.js";
-import { fetchLatestPrices, fetchUsdInrRate, normalizeMarketSymbol } from "./market-data.js";
+import { fetchLatestPrices, fetchMutualFundNavs, fetchUsdInrRate, isMutualFundSchemeCode, normalizeMarketSymbol } from "./market-data.js";
 import { parseSpreadsheet, spreadsheetTemplate } from "./spreadsheet.js";
 
 const main = document.querySelector("#main-content");
@@ -105,7 +105,7 @@ const WORKBOOK_SHEETS = [
   ] },
   { id: "investments", label: "Investments", icon: "📈", prefix: "investment", columns: [
     { key: "id", label: "ID", required: true }, { key: "name", label: "Investment name", options: workbookSelects.investmentProduct, required: true }, { key: "categoryId", label: "Category", options: workbookSelects.investmentCategory, required: true }, { key: "accountId", label: "Account", options: workbookSelects.account },
-    { key: "symbol", label: "Market symbol" }, { key: "quantity", label: "Quantity", type: "number" }, { key: "investedAmount", label: "Invested (native currency)", type: "number" },
+    { key: "symbol", label: "Ticker / AMFI code" }, { key: "quantity", label: "Quantity", type: "number" }, { key: "investedAmount", label: "Invested (native currency)", type: "number" },
     { key: "purchaseDate", label: "Purchase date", type: "date" }, { key: "notes", label: "Notes" }, { key: "currency", label: "Currency", values: ["INR", "USD", "EUR", "GBP", "AED", "SGD"], default: "INR" }
   ] },
   { id: "transactions", label: "Transactions", icon: "↕", prefix: "transaction", columns: [
@@ -130,7 +130,7 @@ const WORKBOOK_SHEETS = [
     { key: "id", label: "ID", required: true }, { key: "name", label: "Card", required: true }, { key: "icon", label: "Icon" }, { key: "status", label: "Status", values: ["Current", "Future"], default: "Current" }, { key: "bankId", label: "Bank", options: workbookSelects.bank }, { key: "creditLimit", label: "Credit limit", type: "number" }, { key: "purpose", label: "Purpose" }, { key: "notes", label: "Notes" }
   ] },
   { id: "investmentProducts", label: "Products", icon: "◇", prefix: "product", columns: [
-    { key: "id", label: "ID", required: true }, { key: "name", label: "Product", required: true }, { key: "ticker", label: "Ticker" }, { key: "categoryId", label: "Category", options: workbookSelects.investmentCategory }, { key: "currency", label: "Currency", values: ["INR", "USD"], default: "INR" }, { key: "monthlyAmount", label: "Monthly amount", type: "number" }, { key: "charges", label: "Charges %", type: "number" }, { key: "status", label: "Status", values: ["Planned", "Active", "Paused", "Completed"], default: "Planned" }, { key: "exposure", label: "Exposure" }, { key: "notes", label: "Notes" }
+    { key: "id", label: "ID", required: true }, { key: "name", label: "Product", required: true }, { key: "ticker", label: "Ticker / AMFI code" }, { key: "categoryId", label: "Category", options: workbookSelects.investmentCategory }, { key: "currency", label: "Currency", values: ["INR", "USD"], default: "INR" }, { key: "monthlyAmount", label: "Monthly amount", type: "number" }, { key: "charges", label: "Charges %", type: "number" }, { key: "status", label: "Status", values: ["Planned", "Active", "Paused", "Completed"], default: "Planned" }, { key: "exposure", label: "Exposure" }, { key: "notes", label: "Notes" }
   ] },
   { id: "categories", label: "Categories", icon: "▤", prefix: "category", columns: [
     { key: "id", label: "ID", required: true }, { key: "group", label: "Group", values: ["investment", "expense", "account"], required: true }, { key: "name", label: "Name", required: true }, { key: "icon", label: "Icon" }, { key: "budget", label: "Monthly budget", type: "number" }
@@ -473,11 +473,15 @@ function renderInvestments() {
       </div>
       <div class="list">${items.length ? items.map((item) => {
         const values = investmentValues(item);
+        const isMutualFund = isMutualFundSchemeCode(item.symbol);
+        const priceLabel = item.currentPrice
+          ? `${isMutualFund ? "NAV " : ""}${formatMoney(item.currentPrice, false, item.currency || "INR")}${isMutualFund ? "" : " per unit"}`
+          : "Price pending";
         return `<div class="list-item">
           <div class="list-main">
             <strong>${escapeHtml(item.name)}${item.import?.managed ? ` <span class="status-badge">Imported</span>` : ""}</strong>
             <small>${escapeHtml(categoryName(item.categoryId))} · ${escapeHtml(accountName(item.accountId))} · ${formatDate(item.purchaseDate)}</small>
-            <small>${item.symbol ? `${escapeHtml(normalizeMarketSymbol(item.symbol))} · Invested ${formatMoney(item.investedAmount, false, item.currency || "INR")} · ${item.currentPrice ? `${formatMoney(item.currentPrice, false, item.currency || "INR")} per unit` : "Price pending"}${String(item.currency || "INR").toUpperCase() === "USD" && item.exchangeRate ? ` · USD/INR ${Number(item.exchangeRate).toFixed(4)}` : ""}${item.priceUpdatedAt ? ` · Updated ${escapeHtml(new Date(item.priceUpdatedAt).toLocaleString(state.settings.locale))}` : ""}` : "No market symbol"}</small>
+            <small>${item.symbol ? `${escapeHtml(normalizeMarketSymbol(item.symbol))} · Invested ${formatMoney(item.investedAmount, false, item.currency || "INR")} · ${priceLabel}${String(item.currency || "INR").toUpperCase() === "USD" && item.exchangeRate ? ` · USD/INR ${Number(item.exchangeRate).toFixed(4)}` : ""}${item.priceAsOf ? ` · NAV date ${escapeHtml(item.priceAsOf)}` : item.priceUpdatedAt ? ` · Updated ${escapeHtml(new Date(item.priceUpdatedAt).toLocaleString(state.settings.locale))}` : ""}` : "No ticker or AMFI code"}</small>
           </div>
           <div class="list-value">
             <strong>${formatMoney(values.currentValue)}</strong>
@@ -1000,6 +1004,8 @@ async function saveWorkbook(exitAfterSave = false) {
     if (normalizeMarketSymbol(previous?.symbol) !== normalized.symbol) {
       delete normalized.currentPrice;
       delete normalized.priceUpdatedAt;
+      delete normalized.priceAsOf;
+      delete normalized.priceSource;
     }
     if (String(normalized.currency || "INR").toUpperCase() !== "USD") {
       delete normalized.exchangeRate;
@@ -1173,7 +1179,7 @@ function openInvestmentForm(item = {}) {
     ${field("name", "Investment name", "text", item.name, { required: true, full: true })}
     ${selectField("categoryId", "Category", categoryOptions("investment", item.categoryId))}
     ${selectField("accountId", "Account", accountOptions(item.accountId))}
-    ${field("symbol", "Market symbol", "text", item.symbol, { full: true, placeholder: "RELIANCE:NSE" })}
+    ${field("symbol", "Ticker or AMFI scheme code", "text", item.symbol, { full: true, placeholder: "RELIANCE:NSE or 122639" })}
     ${field("quantity", "Quantity", "number", item.quantity, { min: 0, step: "any" })}
     ${field("investedAmount", "Invested amount in selected currency", "number", item.investedAmount, { min: 0, step: "0.01" })}
     ${field("purchaseDate", "Purchase date", "date", item.purchaseDate || today(), { required: true })}
@@ -1197,6 +1203,8 @@ function openInvestmentForm(item = {}) {
     if (normalizeMarketSymbol(item.symbol) !== symbol) {
       delete raw.currentPrice;
       delete raw.priceUpdatedAt;
+      delete raw.priceAsOf;
+      delete raw.priceSource;
     }
     await putOne("investments", raw);
     await createNetWorthSnapshot();
@@ -1644,10 +1652,6 @@ async function saveSettings(patch) {
 async function refreshInvestmentPrices({ force = false, silent = false } = {}) {
   if (priceRefreshPromise) return priceRefreshPromise;
   const apiKey = state.settings.marketDataApiKey;
-  if (!apiKey) {
-    if (!silent) throw new Error("Add your Twelve Data API key in Settings first.");
-    return;
-  }
 
   const now = Date.now();
   const candidates = state.data.investments.filter((item) => {
@@ -1664,23 +1668,39 @@ async function refreshInvestmentPrices({ force = false, silent = false } = {}) {
     return;
   }
 
+  const mutualFundCodes = [...new Set(candidates
+    .map((item) => normalizeMarketSymbol(item.symbol))
+    .filter(isMutualFundSchemeCode))];
+  const marketCandidates = candidates.filter((item) => !isMutualFundSchemeCode(item.symbol));
+  const needsUsdInr = marketCandidates.some((item) => String(item.currency || "INR").toUpperCase() === "USD");
+  const symbolLimit = needsUsdInr ? 7 : 8;
+  const marketSymbols = [...new Set(marketCandidates.map((item) => normalizeMarketSymbol(item.symbol)))].slice(0, symbolLimit);
+  if (!apiKey && marketSymbols.length && !mutualFundCodes.length) {
+    if (!silent) throw new Error("Add your Twelve Data API key in Settings first.");
+    return;
+  }
+
   priceRefreshPromise = (async () => {
-    const needsUsdInr = candidates.some((item) => String(item.currency || "INR").toUpperCase() === "USD");
-    const symbolLimit = needsUsdInr ? 7 : 8;
-    const symbols = [...new Set(candidates.map((item) => normalizeMarketSymbol(item.symbol)))].slice(0, symbolLimit);
-    const [prices, usdInrRate] = await Promise.all([
-      fetchLatestPrices(symbols, apiKey),
-      needsUsdInr ? fetchUsdInrRate(apiKey) : Promise.resolve(0)
+    const [marketPrices, mutualFundNavs, usdInrRate] = await Promise.all([
+      marketSymbols.length && apiKey ? fetchLatestPrices(marketSymbols, apiKey) : Promise.resolve(new Map()),
+      mutualFundCodes.length ? fetchMutualFundNavs(mutualFundCodes) : Promise.resolve(new Map()),
+      needsUsdInr && apiKey ? fetchUsdInrRate(apiKey) : Promise.resolve(0)
     ]);
     const priceUpdatedAt = new Date().toISOString();
     let updated = 0;
     for (const item of state.data.investments) {
       const symbol = normalizeMarketSymbol(item.symbol);
-      const currentPrice = prices.get(symbol);
+      const mutualFundNav = mutualFundNavs.get(symbol);
+      const currentPrice = mutualFundNav?.price || marketPrices.get(symbol);
       const isUsd = String(item.currency || "INR").toUpperCase() === "USD";
       if (!currentPrice && !(isUsd && usdInrRate)) continue;
       const next = { ...item, symbol };
-      if (currentPrice) Object.assign(next, { currentPrice, priceUpdatedAt });
+      if (currentPrice) Object.assign(next, {
+        currentPrice,
+        priceUpdatedAt,
+        priceAsOf: mutualFundNav?.date || "",
+        priceSource: mutualFundNav ? "MFAPI / AMFI" : "Twelve Data"
+      });
       if (isUsd && usdInrRate) Object.assign(next, { exchangeRate: usdInrRate, exchangeRateUpdatedAt: priceUpdatedAt });
       delete next.currentValue;
       delete next.buyPrice;
@@ -1689,7 +1709,10 @@ async function refreshInvestmentPrices({ force = false, silent = false } = {}) {
     }
     await loadState();
     if (["home", "investments", "networth"].includes(state.route)) render();
-    if (!silent) showToast(`${updated} investment market value${updated === 1 ? "" : "s"} updated.`);
+    if (!silent) {
+      const skipped = marketSymbols.length && !apiKey ? " Add an API key to update stocks and ETFs." : "";
+      showToast(`${updated} investment market value${updated === 1 ? "" : "s"} updated.${skipped}`);
+    }
   })();
 
   try {
