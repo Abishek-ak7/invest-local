@@ -20,6 +20,7 @@ import {
   liabilityValues,
   monthlyIncome,
   monthlyInvestment,
+  monthlyInvestmentPlanStatus,
   monthlyRemaining,
   netWorth,
   profitPercentage,
@@ -381,6 +382,24 @@ function goalsMarkup(limit) {
   }).join("")}</div>`;
 }
 
+function monthlyInvestmentStatusMarkup(status) {
+  if (!status.target) {
+    return `<div class="monthly-plan-empty">Add monthly plan amounts to compare planned and actual investments by category.</div>`;
+  }
+
+  const pendingMessage = status.pendingItems.length
+    ? `<strong>${status.pendingItems.length} ${status.pendingItems.length === 1 ? "category is" : "categories are"} pending this month.</strong><span>${status.pendingItems.map((item) => `${item.name} ${formatMoney(item.pending)}`).join(" · ")}</span>`
+    : `<strong>All planned categories are complete for this month.</strong>`;
+
+  return `<div class="monthly-plan-status">
+    <div class="monthly-plan-notice ${status.pendingItems.length ? "pending" : "complete"}">${pendingMessage}</div>
+    <div class="monthly-plan-list">${status.items.map((item) => `<div class="monthly-plan-item">
+      <div class="list-main"><strong>${escapeHtml(item.icon)} ${escapeHtml(item.name)}</strong><small>Planned ${formatMoney(item.planned)} · Actual ${formatMoney(item.actual)}</small></div>
+      <div class="list-value"><strong class="${item.pending > 0 ? "negative" : item.status === "Completed" ? "positive" : ""}">${item.pending > 0 ? `${formatMoney(item.pending)} pending` : item.status === "Completed" ? "Complete" : "Not planned"}</strong></div>
+    </div>`).join("")}</div>
+  </div>`;
+}
+
 function renderHome() {
   const month = currentMonth();
   const worth = netWorth(state.data.accounts, state.data.investments, state.data.liabilities);
@@ -388,6 +407,7 @@ function renderHome() {
   const profit = totalProfit(state.data.investments);
   const income = monthlyIncome(state.data.transactions, month);
   const investedThisMonth = monthlyInvestment(state.data.transactions, month);
+  const investmentPlanStatus = monthlyInvestmentPlanStatus(state.data.monthlyPlans, state.data.transactions, state.data.categories, month);
   const expenses = totalExpenses(state.data.transactions, month);
   const remaining = monthlyRemaining(state.data.transactions, month);
   const liabilitySummaries = state.data.liabilities.map((liability) => liabilityValues(liability));
@@ -412,6 +432,7 @@ function renderHome() {
         ${cardVisible("expenses") ? metric("Expenses", formatMoney(expenses), "negative") : ""}
         ${cardVisible("cash") ? metric("Remaining", formatMoney(remaining), remaining < 0 ? "negative" : "positive") : ""}
       </div>
+      ${monthlyInvestmentStatusMarkup(investmentPlanStatus)}
     </section>
     ${cardVisible("investments") ? `<section class="card span-4">
       <div class="section-header"><h2>Portfolio</h2><button class="text-button" data-route-link="investments">View all</button></div>

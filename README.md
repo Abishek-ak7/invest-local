@@ -81,6 +81,8 @@ The dashboard Liabilities card shows remaining debt and combined monthly payment
 
 Open **More → Monthly plan** to view recurring transfer or investment tasks and completion history. Edit tasks in the workbook **Plans** sheet and monthly completion records in **Plan Checks**.
 
+The **This month** dashboard compares each category's recurring amount from the **Plans** sheet with current-month transactions whose type is **Investment** and whose category matches the plan. It shows planned, actual, and pending amounts for every tracked investment category, including actual investments made in categories without a plan.
+
 ## Recording expenses
 
 Use **Add expense** on the Expenses page to enter the amount, category, bank account, date, and description. Saving atomically adds the expense transaction and deducts the same amount from the selected bank-account balance. The expense row shows its linked account; if either database update fails, neither change is saved.

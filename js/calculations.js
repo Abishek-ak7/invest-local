@@ -147,6 +147,55 @@ export function monthlyPlanProgress(plans, transactions, month) {
   };
 }
 
+export function monthlyInvestmentPlanStatus(plans, transactions, categories, month) {
+  const plannedByCategory = new Map();
+  const actualByCategory = new Map();
+
+  for (const plan of plans) {
+    const categoryId = String(plan.categoryId || "");
+    plannedByCategory.set(categoryId, (plannedByCategory.get(categoryId) || 0) + number(plan.amount));
+  }
+
+  for (const transaction of transactions) {
+    if (transaction.type !== "Investment" || !String(transaction.date || "").startsWith(month)) continue;
+    const categoryId = String(transaction.categoryId || "");
+    actualByCategory.set(categoryId, (actualByCategory.get(categoryId) || 0) + number(transaction.amount));
+  }
+
+  const categoryById = new Map(categories
+    .filter((category) => category.group === "investment")
+    .map((category) => [String(category.id), category]));
+  const categoryIds = [...new Set([...categoryById.keys(), ...plannedByCategory.keys(), ...actualByCategory.keys()])];
+  const items = categoryIds.map((categoryId) => {
+    const category = categoryById.get(categoryId);
+    const planned = plannedByCategory.get(categoryId) || 0;
+    const actual = actualByCategory.get(categoryId) || 0;
+    const pending = Math.max(planned - actual, 0);
+    return {
+      categoryId,
+      name: category?.name || "Uncategorized",
+      icon: category?.icon || "",
+      planned,
+      actual,
+      pending,
+      status: planned > 0 ? (pending > 0 ? "Pending" : "Completed") : "Unplanned"
+    };
+  }).filter((item) => item.planned > 0 || item.actual > 0);
+
+  const target = items.reduce((total, item) => total + item.planned, 0);
+  const actual = items.reduce((total, item) => total + item.actual, 0);
+  const completed = items.reduce((total, item) => total + Math.min(item.actual, item.planned), 0);
+  const pending = items.reduce((total, item) => total + item.pending, 0);
+  return {
+    target,
+    actual,
+    pending,
+    percentage: target > 0 ? Math.min((completed / target) * 100, 100) : 0,
+    pendingItems: items.filter((item) => item.pending > 0),
+    items
+  };
+}
+
 export function investmentValues(investment) {
   const quantity = number(investment.quantity);
   const currentPrice = number(investment.currentPrice);

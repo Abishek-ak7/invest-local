@@ -358,6 +358,79 @@ body.workbook-mode main {
   color: var(--muted);
 }
 
+.monthly-plan-status,
+.monthly-plan-empty {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.monthly-plan-empty {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.monthly-plan-notice {
+  display: grid;
+  gap: 0.2rem;
+  padding: 0.75rem;
+  border-left: 3px solid var(--positive);
+  background: color-mix(in srgb, var(--positive) 8%, transparent);
+  font-size: 0.82rem;
+}
+
+.monthly-plan-notice.pending {
+  border-left-color: var(--negative);
+  background: color-mix(in srgb, var(--negative) 8%, transparent);
+}
+
+.monthly-plan-notice span {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.monthly-plan-list {
+  display: grid;
+  margin-top: 0.35rem;
+}
+
+.monthly-plan-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.7rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.monthly-plan-item:last-child {
+  border-bottom: 0;
+}
+
+.monthly-plan-item small {
+  display: block;
+  margin-top: 0.15rem;
+  color: var(--muted);
+}
+
+.monthly-plan-item .list-value {
+  flex: 0 0 auto;
+  font-size: 0.78rem;
+  text-align: right;
+}
+
+@media (max-width: 420px) {
+  .monthly-plan-item {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+
+  .monthly-plan-item .list-value {
+    text-align: left;
+  }
+}
+
 .positive {
   color: var(--positive) !important;
 }
