@@ -106,7 +106,6 @@ export function liabilityValues(liability) {
 
 export function assetAllocation(investments, categories) {
   const investmentCategories = categories.filter((category) => category.group === "investment");
-  const targetTotal = investmentCategories.reduce((sum, category) => sum + number(category.targetAmount), 0);
   const chartColors = ["#176b5b", "#2f80ed", "#7b61ff", "#e0a100", "#b56b00", "#00a884", "#e76f51", "#d14d72", "#77817d"];
   const categoryValues = investmentCategories.map((category) => {
     const holdingValue = investments
@@ -119,14 +118,11 @@ export function assetAllocation(investments, categories) {
   return categoryValues
     .map(({ category, value }, index) => {
       const actual = actualTotal > 0 ? (value / actualTotal) * 100 : 0;
-      const target = targetTotal > 0 ? (number(category.targetAmount) / targetTotal) * 100 : 0;
       return {
         ...category,
         color: chartColors[index % chartColors.length],
-        target,
         value,
-        actual,
-        difference: actual - target
+        actual
       };
     });
 }

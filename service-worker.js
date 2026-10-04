@@ -1,4 +1,4 @@
-const CACHE_NAME = "my-wealth-v40";
+const CACHE_NAME = "my-wealth-v42";
 const APP_SHELL = [
   "./",
   "./index.html",

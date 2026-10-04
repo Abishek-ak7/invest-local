@@ -68,7 +68,6 @@ let workbookDirty = false;
 const routeTitles = {
   home: "Home",
   investments: "Investments",
-  "investment-categories": "Allocation Targets",
   expenses: "Expenses",
   accounts: "Accounts",
   more: "More",
@@ -94,7 +93,7 @@ const workbookSelects = {
 const WORKBOOK_SHEETS = [
   { id: "accounts", label: "Accounts", icon: "🏦", prefix: "account", columns: [
     { key: "id", label: "ID", required: true }, { key: "name", label: "Name", required: true }, { key: "bankId", label: "Bank", options: workbookSelects.bank }, { key: "typeId", label: "Account type", options: workbookSelects.accountCategory, required: true },
-    { key: "balance", label: "Balance", type: "number" }, { key: "minimumBalance", label: "Minimum", type: "number" }, { key: "monthlyAllocation", label: "Monthly allocation", type: "number" },
+    { key: "balance", label: "Balance", type: "number" }, { key: "monthlyAllocation", label: "Monthly allocation", type: "number" },
     { key: "purpose", label: "Purpose" }, { key: "notes", label: "Notes" }, { key: "currency", label: "Currency", values: ["INR", "USD", "EUR", "GBP", "AED", "SGD"], default: "INR" }
   ] },
   { id: "investments", label: "Investments", icon: "📈", prefix: "investment", columns: [
@@ -125,9 +124,6 @@ const WORKBOOK_SHEETS = [
   ] },
   { id: "investmentProducts", label: "Products", icon: "◇", prefix: "product", columns: [
     { key: "id", label: "ID", required: true }, { key: "name", label: "Product", required: true }, { key: "ticker", label: "Ticker" }, { key: "categoryId", label: "Category", options: workbookSelects.investmentCategory }, { key: "monthlyAmount", label: "Monthly amount", type: "number" }, { key: "charges", label: "Charges %", type: "number" }, { key: "status", label: "Status", values: ["Planned", "Active", "Paused", "Completed"], default: "Planned" }, { key: "exposure", label: "Exposure" }, { key: "notes", label: "Notes" }
-  ] },
-  { id: "targets", label: "Targets", icon: "◎", fixedRows: true, columns: [
-    { key: "name", label: "Category", readonly: true }, { key: "targetAmount", label: "Target", type: "number", required: true }
   ] },
   { id: "categories", label: "Categories", icon: "▤", prefix: "category", columns: [
     { key: "id", label: "ID", required: true }, { key: "group", label: "Group", values: ["investment", "expense", "account"], required: true }, { key: "name", label: "Name", required: true }, { key: "icon", label: "Icon" }, { key: "budget", label: "Monthly budget", type: "number" }
@@ -441,7 +437,7 @@ function renderInvestments() {
       ${metric("Return", formatPercent(profitPercentage(state.data.investments)), totalProfit(state.data.investments) < 0 ? "negative" : "positive")}
     </section>
     <section class="card">
-      <div class="section-header"><h2>Current allocation</h2><button class="text-button" data-route-link="investment-categories">View targets</button></div>
+      <div class="section-header"><h2>Current allocation</h2></div>
       <div class="table-wrap"><table>
         <thead><tr><th>Category</th><th>Current amount</th><th>Current allocation</th></tr></thead>
         <tbody>${allocations.map((item) => `<tr>
@@ -550,13 +546,11 @@ function renderExpenses() {
 
 function renderAccounts() {
   const totalBalance = state.data.accounts.reduce((sum, item) => sum + Number(item.balance || 0), 0);
-  const totalMinimum = state.data.accounts.reduce((sum, item) => sum + Number(item.minimumBalance || 0), 0);
   const totalMonthly = state.data.accounts.reduce((sum, item) => sum + Number(item.monthlyAllocation || 0), 0);
   main.className = "";
   main.innerHTML = `
     <section class="metric-grid">
       ${metric("Available cash", formatMoney(totalBalance), totalBalance < 0 ? "negative" : "positive")}
-      ${metric("Monthly minimum", formatMoney(totalMinimum))}
       ${metric("Monthly allocation", formatMoney(totalMonthly))}
       ${metric("Accounts", String(state.data.accounts.length))}
     </section>
@@ -564,7 +558,7 @@ function renderAccounts() {
       <div class="section-header"><h2>Your accounts</h2></div>
       <div class="list">${state.data.accounts.length ? state.data.accounts.map((item) => `<div class="list-item">
         ${item.bankId ? bankMark(bankById(item.bankId)) : `<span class="entity-icon" aria-hidden="true">${escapeHtml(categoryIcon(item.typeId))}</span>`}
-        <div class="list-main"><strong>${escapeHtml(item.name)}${item.import?.managed ? ` <span class="status-badge">Imported</span>` : ""}</strong><small>${escapeHtml(bankName(item.bankId) || item.purpose || categoryName(item.typeId))}</small><small>Minimum ${formatMoney(item.minimumBalance)}</small></div>
+        <div class="list-main"><strong>${escapeHtml(item.name)}${item.import?.managed ? ` <span class="status-badge">Imported</span>` : ""}</strong><small>${escapeHtml(bankName(item.bankId) || item.purpose || categoryName(item.typeId))}</small></div>
         <div class="list-value"><strong class="${Number(item.balance) < 0 ? "negative" : ""}">${formatMoney(item.balance)}</strong><small>${formatMoney(item.monthlyAllocation)} / month</small></div>
       </div>`).join("") : emptyState("No accounts yet.")}</div>
     </section>
@@ -896,9 +890,7 @@ function renderSettings() {
 
 function initializeWorkbookDraft() {
   if (workbookDraft) return;
-  workbookDraft = Object.fromEntries(WORKBOOK_SHEETS.map((sheet) => [sheet.id, sheet.id === "targets"
-    ? state.data.categories.filter((category) => category.group === "investment").map((category) => ({ id: category.id, name: category.name, targetAmount: Number(category.targetAmount || 0) }))
-    : structuredClone(state.data[sheet.id] || [])]));
+  workbookDraft = Object.fromEntries(WORKBOOK_SHEETS.map((sheet) => [sheet.id, structuredClone(state.data[sheet.id] || [])]));
   activeWorkbookSheet = WORKBOOK_SHEETS.some((sheet) => sheet.id === activeWorkbookSheet) ? activeWorkbookSheet : "accounts";
   workbookDirty = false;
   activeWorkbookCell = null;
@@ -906,17 +898,6 @@ function initializeWorkbookDraft() {
 
 function workbookSheet() {
   return WORKBOOK_SHEETS.find((sheet) => sheet.id === activeWorkbookSheet) || WORKBOOK_SHEETS[0];
-}
-
-function synchronizeWorkbookTargets() {
-  const targetsById = new Map(workbookDraft.targets.map((target) => [target.id, target]));
-  workbookDraft.targets = workbookDraft.categories
-    .filter((category) => category.group === "investment")
-    .map((category) => ({
-      id: category.id,
-      name: category.name,
-      targetAmount: Number(targetsById.get(category.id)?.targetAmount ?? category.targetAmount ?? 0)
-    }));
 }
 
 function workbookCellValue(record, column) {
@@ -935,7 +916,7 @@ function workbookColumnOptions(column) {
 function workbookCell(record, column, rowIndex, columnIndex) {
   const value = workbookCellValue(record, column);
   const options = workbookColumnOptions(column);
-  const common = `data-workbook-cell data-key="${escapeHtml(column.key)}" data-column="${columnIndex}" aria-label="${escapeHtml(column.label)} row ${rowIndex + 1}" ${column.readonly ? "readonly" : ""}`;
+  const common = `data-workbook-cell data-key="${escapeHtml(column.key)}" data-column="${columnIndex}" aria-label="${escapeHtml(column.label)} row ${rowIndex + 1}"`;
   if (options) {
     const hasValue = options.some((option) => option.value === value);
     return `<select ${common}>${!hasValue && value ? `<option value="${escapeHtml(value)}" selected>${escapeHtml(value)} (missing)</option>` : ""}${options.map((option) => `<option value="${escapeHtml(option.value)}" ${option.value === value ? "selected" : ""}>${escapeHtml(option.label)}</option>`).join("")}</select>`;
@@ -949,7 +930,7 @@ function workbookRow(record, rowIndex) {
   return `<tr data-workbook-row data-index="${rowIndex}">
     <th class="sheet-row-number" scope="row">${rowIndex + 1}</th>
     ${sheet.columns.map((column, columnIndex) => `<td>${workbookCell(record, column, rowIndex, columnIndex)}</td>`).join("")}
-    ${sheet.fixedRows ? "" : `<td><button class="mini-button danger" data-workbook-delete-row type="button" aria-label="Delete row ${rowIndex + 1}">×</button></td>`}
+    <td><button class="mini-button danger" data-workbook-delete-row type="button" aria-label="Delete row ${rowIndex + 1}">×</button></td>
   </tr>`;
 }
 
@@ -1003,13 +984,7 @@ function validateWorkbook() {
 async function saveWorkbook(exitAfterSave = false) {
   captureWorkbookSheet();
   validateWorkbook();
-  const recordsByStore = structuredClone(workbookDraft);
-  for (const target of recordsByStore.targets) {
-    const category = recordsByStore.categories.find((item) => item.id === target.id);
-    if (category) category.targetAmount = Number(target.targetAmount || 0);
-  }
-  delete recordsByStore.targets;
-  await replaceWorkbookData(recordsByStore);
+  await replaceWorkbookData(workbookDraft);
   workbookDirty = false;
   workbookDraft = null;
   await loadState();
@@ -1024,7 +999,6 @@ async function saveWorkbook(exitAfterSave = false) {
 function renderSpreadsheet() {
   initializeWorkbookDraft();
   const sheet = workbookSheet();
-  if (sheet.id === "targets") synchronizeWorkbookTargets();
   const rows = workbookDraft[sheet.id];
   main.className = "workbook-main";
   main.innerHTML = `<section class="workbook-shell">
@@ -1033,44 +1007,20 @@ function renderSpreadsheet() {
       <div class="workbook-actions"><span class="status-badge">${workbookDirty ? "Unsaved changes" : "Saved"}</span><button class="button secondary" data-workbook-exit type="button">Exit</button><button class="button secondary" data-workbook-save type="button">Save</button><button class="button primary" data-workbook-save-exit type="button">Save &amp; exit</button></div>
     </header>
     <div class="workbook-toolbar">
-      ${sheet.fixedRows ? "" : `<button class="button secondary" data-workbook-add-row type="button">＋ Add row</button>
-      <button class="button secondary" data-workbook-duplicate-row type="button">⧉ Duplicate</button>`}
+      <button class="button secondary" data-workbook-add-row type="button">＋ Add row</button>
+      <button class="button secondary" data-workbook-duplicate-row type="button">⧉ Duplicate</button>
       <span class="status-badge" id="workbook-row-count">${rows.length} rows</span>
       <span class="workbook-help">Select a cell to edit, or paste a value directly.</span>
     </div>
     <div class="sheet-formula-bar workbook-formula"><strong id="workbook-cell-address">--</strong><input id="workbook-formula-input" type="text" aria-label="Selected workbook cell value" placeholder="Select a cell"></div>
-    <div class="workbook-grid-wrap"><table class="sheet-grid workbook-grid"><thead><tr><th class="sheet-corner">#</th>${sheet.columns.map((column, index) => `<th><span>${excelColumnName(index)}</span>${escapeHtml(column.label)}</th>`).join("")}${sheet.fixedRows ? "" : "<th>Delete</th>"}</tr></thead><tbody id="workbook-grid-body">${rows.map(workbookRow).join("")}</tbody></table></div>
+    <div class="workbook-grid-wrap"><table class="sheet-grid workbook-grid"><thead><tr><th class="sheet-corner">#</th>${sheet.columns.map((column, index) => `<th><span>${excelColumnName(index)}</span>${escapeHtml(column.label)}</th>`).join("")}<th>Delete</th></tr></thead><tbody id="workbook-grid-body">${rows.map(workbookRow).join("")}</tbody></table></div>
     <nav class="workbook-tabs" aria-label="Workbook sheets">${WORKBOOK_SHEETS.map((entry) => `<button type="button" data-workbook-sheet="${entry.id}" class="${entry.id === sheet.id ? "active" : ""}"><span aria-hidden="true">${entry.icon}</span>${escapeHtml(entry.label)}<small>${workbookDraft[entry.id].length}</small></button>`).join("")}</nav>
   </section>`;
-}
-
-function renderInvestmentCategories() {
-  const targets = state.data.categories.filter((item) => item.group === "investment");
-  main.className = "";
-  main.innerHTML = `
-    <section class="card">
-      <div class="section-header">
-        <div>
-          <p class="section-label">PORTFOLIO ALLOCATION</p>
-          <h2>Allocation targets</h2>
-        </div>
-        <button class="text-button" data-route-link="investments">Back</button>
-      </div>
-      <p class="muted">Targets are separate from current holdings. Open the workbook Targets sheet to update them.</p>
-    </section>
-    <section class="card">
-      <div class="section-header"><h2>Category targets</h2></div>
-      <div class="table-wrap"><table>
-        <thead><tr><th>Category</th><th>Target</th></tr></thead>
-        <tbody>${targets.map((item) => `<tr><td>${escapeHtml(item.icon || "")} ${escapeHtml(item.name)}</td><td>${formatMoney(item.targetAmount)}</td></tr>`).join("")}</tbody>
-      </table></div>
-    </section>`;
 }
 
 const renderers = {
   home: renderHome,
   investments: renderInvestments,
-  "investment-categories": renderInvestmentCategories,
   expenses: renderExpenses,
   accounts: renderAccounts,
   more: renderMore,
@@ -1088,9 +1038,7 @@ function render() {
   document.body.classList.toggle("workbook-mode", state.route === "spreadsheet");
   pageTitle.textContent = routeTitles[state.route];
   document.querySelectorAll(".nav-item").forEach((item) => {
-    const activeRoute = state.route === "investment-categories"
-      ? "investments"
-      : ["transactions", "goals", "plans", "cards", "strategy", "networth", "spreadsheet", "settings"].includes(state.route) ? "more" : state.route;
+    const activeRoute = ["transactions", "goals", "plans", "cards", "strategy", "networth", "spreadsheet", "settings"].includes(state.route) ? "more" : state.route;
     item.classList.toggle("active", item.dataset.route === activeRoute);
     item.setAttribute("aria-current", item.dataset.route === activeRoute ? "page" : "false");
   });
@@ -1234,7 +1182,6 @@ function openAccountForm(item = {}) {
     ${selectField("bankId", "Bank", bankOptions(item.bankId), true)}
     ${categoryChoiceField("typeId", "Account type", "account", item.typeId)}
     ${field("balance", "Current balance", "number", item.balance, { step: "0.01" })}
-    ${field("minimumBalance", "Monthly minimum required", "number", item.minimumBalance, { min: 0, step: "0.01" })}
     ${field("monthlyAllocation", "Monthly allocation", "number", item.monthlyAllocation, { min: 0, step: "0.01" })}
     ${field("purpose", "Purpose", "text", item.purpose, { full: true })}
     ${textArea("notes", "Notes", item.notes)}
@@ -1246,7 +1193,6 @@ function openAccountForm(item = {}) {
       bankId: formValue(formData, "bankId"),
       typeId: formValue(formData, "typeId"),
       balance: Number(formValue(formData, "balance")),
-      minimumBalance: Number(formValue(formData, "minimumBalance")),
       monthlyAllocation: Number(formValue(formData, "monthlyAllocation")),
       purpose: formValue(formData, "purpose"),
       notes: formValue(formData, "notes")

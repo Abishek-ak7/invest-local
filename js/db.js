@@ -1,5 +1,5 @@
 const DB_NAME = "my-wealth";
-const DB_VERSION = 5;
+const DB_VERSION = 7;
 const CATEGORY_ICON_VERSION = 1;
 const CATEGORY_STRUCTURE_VERSION = 3;
 const BANK_DIRECTORY_VERSION = 1;
@@ -21,17 +21,17 @@ export const STORES = [
 ];
 
 const defaultCategories = [
-  { id: "inv-foreign", group: "investment", name: "Foreign Stocks", icon: "🌎", target: 36.6972477064, color: "#176b5b" },
-  { id: "inv-etfs", group: "investment", name: "ETFs", icon: "🧺", targetAmount: 0 },
-  { id: "inv-funds", group: "investment", name: "Indian Equity Funds", icon: "📊", target: 18.3486238532, color: "#2f80ed" },
-  { id: "inv-stocks", group: "investment", name: "Indian Stocks", icon: "🇮🇳", target: 13.7614678899, color: "#7b61ff" },
-  { id: "inv-gold", group: "investment", name: "Gold / Metals", icon: "🪙", target: 9.1743119266, color: "#e0a100" },
-  { id: "inv-debt", group: "investment", name: "Bonds", icon: "🏦", target: 5.504587156, color: "#b56b00" },
-  { id: "inv-cash", group: "investment", name: "Cash", icon: "💰", target: 9.1743119266, color: "#00a884" },
-  { id: "inv-crypto", group: "investment", name: "Crypto", icon: "₿", target: 3.6697247706, color: "#e76f51" },
-  { id: "inv-trading", group: "investment", name: "Intraday / Trading", icon: "⚡", target: 3.6697247706, color: "#d14d72" },
-  { id: "inv-pf", group: "investment", name: "Provident Fund", icon: "🛡️", target: 0, color: "#4f6d7a" },
-  { id: "inv-other", group: "investment", name: "Other", icon: "🧩", target: 0, color: "#77817d" },
+  { id: "inv-foreign", group: "investment", name: "Foreign Stocks", icon: "🌎", color: "#176b5b" },
+  { id: "inv-etfs", group: "investment", name: "ETFs", icon: "🧺" },
+  { id: "inv-funds", group: "investment", name: "Indian Equity Funds", icon: "📊", color: "#2f80ed" },
+  { id: "inv-stocks", group: "investment", name: "Indian Stocks", icon: "🇮🇳", color: "#7b61ff" },
+  { id: "inv-gold", group: "investment", name: "Gold / Metals", icon: "🪙", color: "#e0a100" },
+  { id: "inv-debt", group: "investment", name: "Bonds", icon: "🏦", color: "#b56b00" },
+  { id: "inv-cash", group: "investment", name: "Cash", icon: "💰", color: "#00a884" },
+  { id: "inv-crypto", group: "investment", name: "Crypto", icon: "₿", color: "#e76f51" },
+  { id: "inv-trading", group: "investment", name: "Intraday / Trading", icon: "⚡", color: "#d14d72" },
+  { id: "inv-pf", group: "investment", name: "Provident Fund", icon: "🛡️", color: "#4f6d7a" },
+  { id: "inv-other", group: "investment", name: "Other", icon: "🧩", color: "#77817d" },
   { id: "exp-1", group: "expense", name: "Rent / Regular", icon: "🏠", color: "#176b5b", budget: 13500 },
   { id: "exp-2", group: "expense", name: "Food / Snacks", icon: "🍽️", color: "#2f80ed", budget: 4000 },
   { id: "exp-3", group: "expense", name: "Travel", icon: "✈️", color: "#7b61ff", budget: 4000 },
@@ -114,13 +114,28 @@ export function openDatabase() {
   databasePromise = new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
 
-    request.onupgradeneeded = () => {
+    request.onupgradeneeded = (event) => {
       const database = request.result;
       if (database.objectStoreNames.contains("connections")) database.deleteObjectStore("connections");
       for (const store of STORES) {
         if (!database.objectStoreNames.contains(store)) {
           database.createObjectStore(store, { keyPath: "id" });
         }
+      }
+      if (event.oldVersion < 7) {
+        const stripFields = (storeName, fields) => {
+          const cursorRequest = request.transaction.objectStore(storeName).openCursor();
+          cursorRequest.onsuccess = () => {
+            const cursor = cursorRequest.result;
+            if (!cursor) return;
+            const record = cursor.value;
+            for (const field of fields) delete record[field];
+            cursor.update(record);
+            cursor.continue();
+          };
+        };
+        stripFields("accounts", ["targetBalance", "minimumBalance"]);
+        stripFields("categories", ["target", "targetAmount", "actualAmount"]);
       }
     };
     request.onblocked = () => reject(new Error("Database upgrade is blocked by another My Wealth tab. Close other tabs and reload."));

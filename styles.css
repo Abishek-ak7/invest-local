@@ -770,75 +770,6 @@ label > span {
   background: var(--surface);
 }
 
-.allocation-variance {
-  display: grid;
-  gap: 0.9rem;
-  padding: 1rem;
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  background: var(--surface-2);
-}
-
-.allocation-variance .section-header,
-.allocation-variance h3,
-.allocation-help {
-  margin: 0;
-}
-
-.allocation-help {
-  margin-top: 0.2rem;
-  font-size: 0.78rem;
-}
-
-.allocation-variance-list {
-  display: grid;
-  gap: 1rem;
-}
-
-.allocation-variance-row {
-  display: grid;
-  gap: 0.45rem;
-  padding-bottom: 1rem;
-  border-bottom: 1px solid var(--border);
-}
-
-.allocation-variance-row:last-child {
-  padding-bottom: 0;
-  border-bottom: 0;
-}
-
-.allocation-variance-heading {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.paired-bar-row {
-  display: grid;
-  grid-template-columns: 3.25rem minmax(0, 1fr) 3.2rem;
-  align-items: center;
-  gap: 0.5rem;
-  color: var(--muted);
-  font-size: 0.75rem;
-}
-
-.paired-bar-row strong {
-  color: var(--text);
-  text-align: right;
-}
-
-.paired-progress {
-  height: 0.5rem;
-  margin: 0;
-  background: var(--surface);
-}
-
-.paired-progress .target-bar {
-  border: 1px solid var(--accent);
-  background: var(--accent-soft);
-}
-
 .donut {
   display: grid;
   width: min(58vw, 210px);
@@ -1356,13 +1287,6 @@ dialog::backdrop {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .allocation-variance {
-    grid-column: 1 / -1;
-  }
-
-  .allocation-variance-list {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
 
   .form-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
