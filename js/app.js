@@ -102,7 +102,7 @@ const WORKBOOK_SHEETS = [
   ] },
   { id: "investments", label: "Investments", icon: "📈", prefix: "investment", columns: [
     { key: "id", label: "ID", required: true }, { key: "name", label: "Name", required: true }, { key: "categoryId", label: "Category", options: workbookSelects.investmentCategory, required: true }, { key: "accountId", label: "Account", options: workbookSelects.account },
-    { key: "symbol", label: "Market symbol" }, { key: "quantity", label: "Quantity", type: "number" }, { key: "investedAmount", label: "Invested", type: "number" },
+    { key: "symbol", label: "Market symbol" }, { key: "quantity", label: "Quantity", type: "number" }, { key: "investedAmount", label: "Invested (native currency)", type: "number" },
     { key: "purchaseDate", label: "Purchase date", type: "date" }, { key: "notes", label: "Notes" }, { key: "currency", label: "Currency", values: ["INR", "USD", "EUR", "GBP", "AED", "SGD"], default: "INR" }
   ] },
   { id: "transactions", label: "Transactions", icon: "↕", prefix: "transaction", columns: [
@@ -474,7 +474,7 @@ function renderInvestments() {
           <div class="list-main">
             <strong>${escapeHtml(item.name)}${item.import?.managed ? ` <span class="status-badge">Imported</span>` : ""}</strong>
             <small>${escapeHtml(categoryName(item.categoryId))} · ${escapeHtml(accountName(item.accountId))} · ${formatDate(item.purchaseDate)}</small>
-            <small>${item.symbol ? `${escapeHtml(normalizeMarketSymbol(item.symbol))} · ${item.currentPrice ? `${formatMoney(item.currentPrice, false, item.currency || "INR")} per unit` : "Price pending"}${String(item.currency || "INR").toUpperCase() === "USD" && item.exchangeRate ? ` · USD/INR ${Number(item.exchangeRate).toFixed(4)}` : ""}${item.priceUpdatedAt ? ` · Updated ${escapeHtml(new Date(item.priceUpdatedAt).toLocaleString(state.settings.locale))}` : ""}` : "No market symbol"}</small>
+            <small>${item.symbol ? `${escapeHtml(normalizeMarketSymbol(item.symbol))} · Invested ${formatMoney(item.investedAmount, false, item.currency || "INR")} · ${item.currentPrice ? `${formatMoney(item.currentPrice, false, item.currency || "INR")} per unit` : "Price pending"}${String(item.currency || "INR").toUpperCase() === "USD" && item.exchangeRate ? ` · USD/INR ${Number(item.exchangeRate).toFixed(4)}` : ""}${item.priceUpdatedAt ? ` · Updated ${escapeHtml(new Date(item.priceUpdatedAt).toLocaleString(state.settings.locale))}` : ""}` : "No market symbol"}</small>
           </div>
           <div class="list-value">
             <strong>${formatMoney(values.currentValue)}</strong>
@@ -1172,7 +1172,7 @@ function openInvestmentForm(item = {}) {
     ${selectField("accountId", "Account", accountOptions(item.accountId))}
     ${field("symbol", "Market symbol", "text", item.symbol, { full: true, placeholder: "RELIANCE:NSE" })}
     ${field("quantity", "Quantity", "number", item.quantity, { min: 0, step: "any" })}
-    ${field("investedAmount", "Invested amount", "number", item.investedAmount, { min: 0, step: "0.01" })}
+    ${field("investedAmount", "Invested amount in selected currency", "number", item.investedAmount, { min: 0, step: "0.01" })}
     ${field("purchaseDate", "Purchase date", "date", item.purchaseDate || today(), { required: true })}
     ${textArea("notes", "Notes", item.notes)}
   `, async (formData) => {

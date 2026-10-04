@@ -150,9 +150,9 @@ export function monthlyPlanProgress(plans, transactions, month) {
 export function investmentValues(investment) {
   const quantity = number(investment.quantity);
   const currentPrice = number(investment.currentPrice);
-  const investedAmount = number(investment.investedAmount);
   const quoteCurrency = String(investment.currency || "INR").toUpperCase();
   const exchangeRate = quoteCurrency === "USD" ? number(investment.exchangeRate) : 1;
+  const investedAmount = number(investment.investedAmount) * exchangeRate;
   const quotedValue = quantity * currentPrice * exchangeRate;
   const currentValue = quotedValue > 0 ? quotedValue : number(investment.currentValue) || investedAmount;
   const profit = currentValue - investedAmount;
