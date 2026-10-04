@@ -419,6 +419,55 @@ body.workbook-mode main {
   text-align: right;
 }
 
+.monthly-streak {
+  margin-top: 0.75rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.monthly-response-controls {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 0.4rem;
+}
+
+.monthly-response-button {
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 1rem;
+  font-weight: 900;
+}
+
+.monthly-response-button.complete.selected {
+  border-color: var(--positive);
+  background: var(--positive);
+  color: white;
+}
+
+.monthly-response-button.skipped.selected,
+.completion-button.skipped {
+  border-color: var(--negative);
+  background: var(--negative);
+  color: white;
+}
+
+.monthly-plan-submit {
+  width: 100%;
+  margin-top: 0.75rem;
+}
+
+.monthly-plan-submit:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
 @media (max-width: 420px) {
   .monthly-plan-item {
     align-items: flex-start;
@@ -428,6 +477,10 @@ body.workbook-mode main {
 
   .monthly-plan-item .list-value {
     text-align: left;
+  }
+
+  .monthly-response-controls {
+    align-self: stretch;
   }
 }
 

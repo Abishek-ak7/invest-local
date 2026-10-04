@@ -11,7 +11,8 @@ import {
   recordExpense,
   replaceImportedData,
   replaceWorkbookData,
-  resetToDefaults
+  resetToDefaults,
+  saveMonthlyPlanResponses
 } from "./db.js";
 import {
   assetAllocation,
@@ -68,6 +69,7 @@ let activeWorkbookSheet = "accounts";
 let activeWorkbookCell = null;
 let workbookDirty = false;
 let priceRefreshPromise = null;
+const monthlyResponseDraft = new Map();
 
 const PRICE_CACHE_DURATION = 15 * 60 * 1000;
 const TWELVE_DATA_REQUEST_INTERVAL = 8000;
@@ -126,7 +128,7 @@ const WORKBOOK_SHEETS = [
     { key: "id", label: "ID", required: true }, { key: "name", label: "Plan item", required: true }, { key: "categoryId", label: "Category", options: workbookSelects.investmentCategory }, { key: "amount", label: "Monthly amount", type: "number" }, { key: "purpose", label: "Purpose" }
   ] },
   { id: "planCompletions", label: "Plan Checks", icon: "✓", prefix: "completion", columns: [
-    { key: "id", label: "ID", required: true }, { key: "planId", label: "Plan", options: workbookSelects.plan, required: true }, { key: "month", label: "Month", type: "month", required: true }, { key: "completedAt", label: "Completed at", type: "datetime-local" }
+    { key: "id", label: "ID", required: true }, { key: "planId", label: "Plan", options: workbookSelects.plan, required: true }, { key: "month", label: "Month", type: "month", required: true }, { key: "status", label: "Status", values: ["Completed", "Skipped"], default: "Completed" }, { key: "completedAt", label: "Completed at", type: "datetime-local" }
   ] },
   { id: "cards", label: "Cards", icon: "▣", prefix: "card", columns: [
     { key: "id", label: "ID", required: true }, { key: "name", label: "Card", required: true }, { key: "icon", label: "Icon" }, { key: "status", label: "Status", values: ["Current", "Future"], default: "Current" }, { key: "bankId", label: "Bank", options: workbookSelects.bank }, { key: "creditLimit", label: "Credit limit", type: "number" }, { key: "purpose", label: "Purpose" }, { key: "notes", label: "Notes" }
@@ -382,7 +384,7 @@ function goalsMarkup(limit) {
   }).join("")}</div>`;
 }
 
-function monthlyInvestmentStatusMarkup(status) {
+function monthlyInvestmentStatusMarkup(status, month) {
   if (!status.target) {
     return `<div class="monthly-plan-empty">Add monthly plan amounts to compare planned and actual investments by category.</div>`;
   }
@@ -391,12 +393,29 @@ function monthlyInvestmentStatusMarkup(status) {
     ? `<strong>${status.pendingItems.length} ${status.pendingItems.length === 1 ? "category is" : "categories are"} pending this month.</strong><span>${status.pendingItems.map((item) => `${item.name} ${formatMoney(item.pending)}`).join(" · ")}</span>`
     : `<strong>All planned categories are complete for this month.</strong>`;
 
+  const allAnswered = allPlansAnswered(month);
+  const monthlyStreak = allAnswered ? monthlyCompletionStreak(month) : 0;
+  const responseSummary = allAnswered
+    ? monthlyStreak
+      ? `<div class="monthly-streak">${monthlyStreak} month completion streak</div>`
+      : `<div class="monthly-streak muted">All categories answered. Not-added categories do not extend the completion streak.</div>`
+    : `<div class="monthly-streak muted">Answer every planned category and submit to update streaks.</div>`;
+
   return `<div class="monthly-plan-status">
     <div class="monthly-plan-notice ${status.pendingItems.length ? "pending" : "complete"}">${pendingMessage}</div>
-    <div class="monthly-plan-list">${status.items.map((item) => `<div class="monthly-plan-item">
-      <div class="list-main"><strong>${escapeHtml(item.icon)} ${escapeHtml(item.name)}</strong><small>Planned ${formatMoney(item.planned)} · Actual ${formatMoney(item.actual)}</small></div>
-      <div class="list-value"><strong class="${item.pending > 0 ? "negative" : item.status === "Completed" ? "positive" : ""}">${item.pending > 0 ? `${formatMoney(item.pending)} pending` : item.status === "Completed" ? "Complete" : "Not planned"}</strong></div>
-    </div>`).join("")}</div>
+    ${responseSummary}
+    <div class="monthly-plan-list">${status.items.map((item) => {
+      const response = monthlyCategoryResponse(item.categoryId, month);
+      const streak = allAnswered && response === "Completed" ? categoryCompletionStreak(item.categoryId, month) : 0;
+      return `<div class="monthly-plan-item">
+        <div class="list-main"><strong>${escapeHtml(item.icon)} ${escapeHtml(item.name)}</strong><small>Planned ${formatMoney(item.planned)} · Actual ${formatMoney(item.actual)}</small>${item.planned > 0 ? `<small>${streak ? `${streak} month streak` : response === "Skipped" ? "Not added this month" : allAnswered ? "No active streak" : "Awaiting all responses"}</small>` : ""}</div>
+        ${item.planned > 0 ? `<div class="monthly-response-controls" role="group" aria-label="${escapeHtml(`${item.name} monthly response`)}">
+          <button class="monthly-response-button complete ${response === "Completed" ? "selected" : ""}" data-monthly-response="Completed" data-category-id="${escapeHtml(item.categoryId)}" title="Added this month" aria-label="Mark ${escapeHtml(item.name)} added this month" aria-pressed="${response === "Completed"}">✓</button>
+          <button class="monthly-response-button skipped ${response === "Skipped" ? "selected" : ""}" data-monthly-response="Skipped" data-category-id="${escapeHtml(item.categoryId)}" title="Not added this month" aria-label="Mark ${escapeHtml(item.name)} not added this month" aria-pressed="${response === "Skipped"}">×</button>
+        </div>` : `<div class="list-value"><strong>Not planned</strong></div>`}
+      </div>`;
+    }).join("")}</div>
+    <button class="button primary monthly-plan-submit" data-submit-monthly-responses ${allMonthlyCategoriesSelected(status.items, month) ? "" : "disabled"}>Submit monthly responses</button>
   </div>`;
 }
 
@@ -432,7 +451,7 @@ function renderHome() {
         ${cardVisible("expenses") ? metric("Expenses", formatMoney(expenses), "negative") : ""}
         ${cardVisible("cash") ? metric("Remaining", formatMoney(remaining), remaining < 0 ? "negative" : "positive") : ""}
       </div>
-      ${monthlyInvestmentStatusMarkup(investmentPlanStatus)}
+      ${monthlyInvestmentStatusMarkup(investmentPlanStatus, month)}
     </section>
     ${cardVisible("investments") ? `<section class="card span-4">
       <div class="section-header"><h2>Portfolio</h2><button class="text-button" data-route-link="investments">View all</button></div>
@@ -689,8 +708,35 @@ function renderGoals() {
   </section>`;
 }
 
-function planCompletion(planId, month) {
+function planResponse(planId, month) {
   return state.data.planCompletions.find((entry) => entry.planId === planId && entry.month === month);
+}
+
+function planCompletion(planId, month) {
+  const response = planResponse(planId, month);
+  return response && (!response.status || response.status === "Completed") ? response : null;
+}
+
+function planAnswered(planId, month) {
+  return Boolean(planResponse(planId, month));
+}
+
+function allPlansAnswered(month) {
+  const plans = state.data.monthlyPlans.filter((plan) => Number(plan.amount || 0) > 0);
+  return plans.length > 0 && plans.every((plan) => planAnswered(plan.id, month));
+}
+
+function monthlyCategoryResponse(categoryId, month) {
+  if (monthlyResponseDraft.has(categoryId)) return monthlyResponseDraft.get(categoryId);
+  const plans = state.data.monthlyPlans.filter((plan) => String(plan.categoryId || "") === String(categoryId || "") && Number(plan.amount || 0) > 0);
+  if (!plans.length) return "";
+  const responses = plans.map((plan) => planResponse(plan.id, month));
+  if (responses.some((response) => !response)) return "";
+  return responses.every((response) => !response.status || response.status === "Completed") ? "Completed" : "Skipped";
+}
+
+function allMonthlyCategoriesSelected(items, month) {
+  return items.filter((item) => item.planned > 0).every((item) => monthlyCategoryResponse(item.categoryId, month));
 }
 
 function offsetMonth(month, offset) {
@@ -709,9 +755,32 @@ function planStreak(planId, endingMonth = currentMonth()) {
   return streak;
 }
 
+function categoryCompletionStreak(categoryId, endingMonth = currentMonth()) {
+  const plans = state.data.monthlyPlans.filter((plan) => String(plan.categoryId || "") === String(categoryId || "") && Number(plan.amount || 0) > 0);
+  let streak = 0;
+  let month = endingMonth;
+  while (plans.length && plans.every((plan) => planCompletion(plan.id, month))) {
+    streak += 1;
+    month = offsetMonth(month, -1);
+  }
+  return streak;
+}
+
+function monthlyCompletionStreak(endingMonth = currentMonth()) {
+  const plans = state.data.monthlyPlans.filter((plan) => Number(plan.amount || 0) > 0);
+  let streak = 0;
+  let month = endingMonth;
+  while (plans.length && plans.every((plan) => planCompletion(plan.id, month))) {
+    streak += 1;
+    month = offsetMonth(month, -1);
+  }
+  return streak;
+}
+
 function renderPlans() {
   const month = state.filters.planMonth || currentMonth();
   const completedPlans = state.data.monthlyPlans.filter((plan) => planCompletion(plan.id, month));
+  const answered = allPlansAnswered(month);
   const target = state.data.monthlyPlans.reduce((sum, plan) => sum + Number(plan.amount || 0), 0);
   const completed = completedPlans.reduce((sum, plan) => sum + Number(plan.amount || 0), 0);
   const percentage = target > 0 ? (completed / target) * 100 : 0;
@@ -730,11 +799,12 @@ function renderPlans() {
     <div class="section-header"><h2>Plan items</h2></div>
     <div class="list">${state.data.monthlyPlans.length ? state.data.monthlyPlans.map((plan) => {
       const done = Boolean(planCompletion(plan.id, month));
-      const streak = planStreak(plan.id, month);
+      const skipped = planResponse(plan.id, month)?.status === "Skipped";
+      const streak = answered && done ? planStreak(plan.id, month) : 0;
       return `<div class="list-item ${done ? "completed-item" : ""}">
-      <span class="completion-button ${done ? "complete" : ""}" aria-label="${done ? "Completed" : "Pending"}">${done ? "✓" : ""}</span>
-      <div class="list-main"><strong>${escapeHtml(plan.name)}</strong><small>${escapeHtml(plan.purpose || categoryName(plan.categoryId))}</small><small>${streak ? `🔥 ${streak} month streak` : "No active streak"}</small></div>
-      <div class="list-value"><strong>${formatMoney(plan.amount)}</strong><small>${done ? "Completed" : "Pending"}</small></div>
+      <span class="completion-button ${done ? "complete" : skipped ? "skipped" : ""}" aria-label="${done ? "Completed" : skipped ? "Not added" : "Pending"}">${done ? "✓" : skipped ? "×" : ""}</span>
+      <div class="list-main"><strong>${escapeHtml(plan.name)}</strong><small>${escapeHtml(plan.purpose || categoryName(plan.categoryId))}</small><small>${streak ? `${streak} month streak` : skipped ? "Not added this month" : answered ? "No active streak" : "Awaiting all responses"}</small></div>
+      <div class="list-value"><strong>${formatMoney(plan.amount)}</strong><small>${done ? "Completed" : skipped ? "Not added" : "Pending"}</small></div>
     </div>`;
     }).join("") : emptyState("No monthly plan items yet.")}</div>
   </section>`;
@@ -1823,6 +1893,31 @@ themeToggleButton.addEventListener("click", async () => {
 });
 
 main.addEventListener("click", async (event) => {
+  const monthlyResponseButton = event.target.closest("[data-monthly-response]");
+  if (monthlyResponseButton) {
+    monthlyResponseDraft.set(monthlyResponseButton.dataset.categoryId, monthlyResponseButton.dataset.monthlyResponse);
+    renderHome();
+    return;
+  }
+
+  if (event.target.closest("[data-submit-monthly-responses]")) {
+    const month = currentMonth();
+    const categoryIds = [...new Set(state.data.monthlyPlans.filter((plan) => Number(plan.amount || 0) > 0).map((plan) => String(plan.categoryId || "")))];
+    const responses = categoryIds.map((categoryId) => ({ categoryId, status: monthlyCategoryResponse(categoryId, month) }));
+    if (responses.some((response) => !response.status)) return showToast("Answer every planned category before submitting.");
+    try {
+      await saveMonthlyPlanResponses(month, responses, state.data.monthlyPlans, state.data.transactions);
+      monthlyResponseDraft.clear();
+      await loadState();
+      renderHome();
+      showToast("Monthly responses saved. Dashboard, transactions, and streaks updated.");
+    } catch (error) {
+      console.error(error);
+      showToast(error.message || "Monthly responses could not be saved.");
+    }
+    return;
+  }
+
   const routeLink = event.target.closest("[data-route-link]");
   if (routeLink) return routeTo(routeLink.dataset.routeLink);
 

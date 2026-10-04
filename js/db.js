@@ -192,6 +192,61 @@ export async function recordExpense(expense) {
   return expense;
 }
 
+export async function saveMonthlyPlanResponses(month, responses, plans, transactions) {
+  const database = await openDatabase();
+  const transaction = database.transaction(["planCompletions", "transactions"], "readwrite");
+  const completionStore = transaction.objectStore("planCompletions");
+  const transactionStore = transaction.objectStore("transactions");
+  const respondedAt = new Date().toISOString();
+
+  for (const response of responses) {
+    const categoryId = String(response.categoryId || "");
+    const categoryPlans = plans.filter((plan) => String(plan.categoryId || "") === categoryId && Number(plan.amount || 0) > 0);
+    const generatedId = `monthly-plan-${month}-${categoryId || "uncategorized"}`;
+
+    for (const plan of categoryPlans) {
+      completionStore.put({
+        id: `${plan.id}-${month}`,
+        planId: plan.id,
+        month,
+        status: response.status,
+        respondedAt,
+        completedAt: response.status === "Completed" ? respondedAt : ""
+      });
+    }
+
+    if (response.status === "Completed") {
+      const planned = categoryPlans.reduce((sum, plan) => sum + Number(plan.amount || 0), 0);
+      const actual = transactions
+        .filter((item) => item.id !== generatedId && item.type === "Investment" && String(item.date || "").startsWith(month) && String(item.categoryId || "") === categoryId)
+        .reduce((sum, item) => sum + Number(item.amount || 0), 0);
+      const missing = Math.max(planned - actual, 0);
+      if (missing > 0) {
+        const [year, monthNumber] = month.split("-").map(Number);
+        const day = Math.min(new Date().getDate(), new Date(year, monthNumber, 0).getDate());
+        transactionStore.put({
+          id: generatedId,
+          type: "Investment",
+          date: `${month}-${String(day).padStart(2, "0")}`,
+          amount: missing,
+          categoryId,
+          accountId: "",
+          description: "Monthly plan completion",
+          notes: "Added from the This month checklist.",
+          currency: "INR",
+          planResponse: { managed: true, month, categoryId }
+        });
+      } else {
+        transactionStore.delete(generatedId);
+      }
+    } else {
+      transactionStore.delete(generatedId);
+    }
+  }
+
+  await transactionDone(transaction);
+}
+
 export async function deleteOne(storeName, id) {
   const database = await openDatabase();
   const transaction = database.transaction(storeName, "readwrite");

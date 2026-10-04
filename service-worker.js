@@ -1,10 +1,10 @@
-const CACHE_NAME = "my-wealth-v55";
+const CACHE_NAME = "my-wealth-v56";
 const APP_SHELL = [
   "./",
   "./index.html",
   "./styles.css",
   "./manifest.json",
-  "./js/app.js?v=55",
+  "./js/app.js?v=56",
   "./js/db.js",
   "./js/calculations.js",
   "./js/market-data.js",
