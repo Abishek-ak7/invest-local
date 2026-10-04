@@ -192,7 +192,7 @@ export async function recordExpense(expense) {
   return expense;
 }
 
-export async function saveMonthlyPlanResponses(month, responses, plans, transactions) {
+export async function saveMonthlyPlanResponses(month, responses, plans, transactions, currency = "INR") {
   const database = await openDatabase();
   const transaction = database.transaction(["planCompletions", "transactions"], "readwrite");
   const completionStore = transaction.objectStore("planCompletions");
@@ -233,7 +233,7 @@ export async function saveMonthlyPlanResponses(month, responses, plans, transact
           accountId: "",
           description: "Monthly plan completion",
           notes: "Added from the This month checklist.",
-          currency: "INR",
+          currency: String(currency || "INR").toUpperCase(),
           planResponse: { managed: true, month, categoryId }
         });
       } else {

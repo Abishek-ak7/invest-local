@@ -1,14 +1,15 @@
-const CACHE_NAME = "my-wealth-v56";
+const CACHE_NAME = "my-wealth-v58";
 const APP_SHELL = [
   "./",
   "./index.html",
   "./styles.css",
   "./manifest.json",
-  "./js/app.js?v=56",
+  "./js/app.js?v=58",
   "./js/db.js",
   "./js/calculations.js",
   "./js/market-data.js",
   "./js/spreadsheet.js",
+  "./js/workbook-file.js",
   "./icons/app-icon.svg"
 ];
 const APP_SHELL_URLS = new Set(APP_SHELL.map((path) => new URL(path, self.location.href).href));

@@ -152,6 +152,31 @@ button {
   font-size: 1.2rem;
 }
 
+.streak-button {
+  position: relative;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--positive);
+  font-size: 1.2rem;
+}
+
+.streak-button small {
+  position: absolute;
+  right: -0.2rem;
+  bottom: -0.2rem;
+  display: grid;
+  min-width: 1.15rem;
+  height: 1.15rem;
+  padding: 0 0.2rem;
+  place-items: center;
+  border: 2px solid var(--background);
+  border-radius: 999px;
+  background: var(--accent);
+  color: white;
+  font-size: 0.62rem;
+  font-weight: 800;
+}
+
 main {
   display: grid;
   gap: 1rem;
@@ -456,16 +481,6 @@ body.workbook-mode main {
   border-color: var(--negative);
   background: var(--negative);
   color: white;
-}
-
-.monthly-plan-submit {
-  width: 100%;
-  margin-top: 0.75rem;
-}
-
-.monthly-plan-submit:disabled {
-  cursor: not-allowed;
-  opacity: 0.45;
 }
 
 @media (max-width: 420px) {

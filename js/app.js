@@ -32,6 +32,7 @@ import {
 } from "./calculations.js";
 import { fetchLatestPrices, fetchMutualFundNavs, fetchUsdInrRate, isMutualFundSchemeCode, normalizeMarketSymbol } from "./market-data.js";
 import { parseSpreadsheet, spreadsheetTemplate } from "./spreadsheet.js";
+import { createExcelWorkbook, parseExcelWorkbook } from "./workbook-file.js";
 
 const main = document.querySelector("#main-content");
 const pageTitle = document.querySelector("#page-title");
@@ -43,7 +44,10 @@ const dialogSave = document.querySelector("#dialog-save");
 const toastElement = document.querySelector("#toast");
 const backupInput = document.querySelector("#backup-file-input");
 const spreadsheetInput = document.querySelector("#spreadsheet-file-input");
+const fullWorkbookInput = document.querySelector("#full-workbook-file-input");
 const themeToggleButton = document.querySelector("#theme-toggle-button");
+const streakButton = document.querySelector("#monthly-streak-button");
+const streakCount = document.querySelector("#monthly-streak-count");
 
 const storeNames = STORES.filter((name) => name !== "settings");
 const state = {
@@ -69,7 +73,6 @@ let activeWorkbookSheet = "accounts";
 let activeWorkbookCell = null;
 let workbookDirty = false;
 let priceRefreshPromise = null;
-const monthlyResponseDraft = new Map();
 
 const PRICE_CACHE_DURATION = 15 * 60 * 1000;
 const TWELVE_DATA_REQUEST_INTERVAL = 8000;
@@ -393,29 +396,31 @@ function monthlyInvestmentStatusMarkup(status, month) {
     ? `<strong>${status.pendingItems.length} ${status.pendingItems.length === 1 ? "category is" : "categories are"} pending this month.</strong><span>${status.pendingItems.map((item) => `${item.name} ${formatMoney(item.pending)}`).join(" · ")}</span>`
     : `<strong>All planned categories are complete for this month.</strong>`;
 
-  const allAnswered = allPlansAnswered(month);
+  const allAnswered = allCategoriesResolved(month);
   const monthlyStreak = allAnswered ? monthlyCompletionStreak(month) : 0;
   const responseSummary = allAnswered
     ? monthlyStreak
       ? `<div class="monthly-streak">${monthlyStreak} month completion streak</div>`
       : `<div class="monthly-streak muted">All categories answered. Not-added categories do not extend the completion streak.</div>`
-    : `<div class="monthly-streak muted">Answer every planned category and submit to update streaks.</div>`;
+    : `<div class="monthly-streak muted">Respond to each pending category. Every choice saves immediately.</div>`;
 
   return `<div class="monthly-plan-status">
     <div class="monthly-plan-notice ${status.pendingItems.length ? "pending" : "complete"}">${pendingMessage}</div>
     ${responseSummary}
     <div class="monthly-plan-list">${status.items.map((item) => {
       const response = monthlyCategoryResponse(item.categoryId, month);
-      const streak = allAnswered && response === "Completed" ? categoryCompletionStreak(item.categoryId, month) : 0;
+      const alreadyAdded = item.planned > 0 && item.pending <= 0 && response !== "Completed";
+      const completed = item.pending <= 0 || response === "Completed";
+      const streak = allAnswered && completed ? categoryCompletionStreak(item.categoryId, month) : 0;
+      const responseText = alreadyAdded ? "Already added this month" : response === "Skipped" ? "Not added this month" : allAnswered ? "Complete" : "Waiting for your response";
       return `<div class="monthly-plan-item">
-        <div class="list-main"><strong>${escapeHtml(item.icon)} ${escapeHtml(item.name)}</strong><small>Planned ${formatMoney(item.planned)} · Actual ${formatMoney(item.actual)}</small>${item.planned > 0 ? `<small>${streak ? `${streak} month streak` : response === "Skipped" ? "Not added this month" : allAnswered ? "No active streak" : "Awaiting all responses"}</small>` : ""}</div>
-        ${item.planned > 0 ? `<div class="monthly-response-controls" role="group" aria-label="${escapeHtml(`${item.name} monthly response`)}">
+        <div class="list-main"><strong>${escapeHtml(item.icon)} ${escapeHtml(item.name)}</strong><small>Planned ${formatMoney(item.planned)} · Actual ${formatMoney(item.actual)}</small>${item.planned > 0 ? `<small>${responseText}${streak ? ` · ${streak} month streak` : ""}</small>` : ""}</div>
+        ${item.planned > 0 && !alreadyAdded ? `<div class="monthly-response-controls" role="group" aria-label="${escapeHtml(`${item.name} monthly response`)}">
           <button class="monthly-response-button complete ${response === "Completed" ? "selected" : ""}" data-monthly-response="Completed" data-category-id="${escapeHtml(item.categoryId)}" title="Added this month" aria-label="Mark ${escapeHtml(item.name)} added this month" aria-pressed="${response === "Completed"}">✓</button>
           <button class="monthly-response-button skipped ${response === "Skipped" ? "selected" : ""}" data-monthly-response="Skipped" data-category-id="${escapeHtml(item.categoryId)}" title="Not added this month" aria-label="Mark ${escapeHtml(item.name)} not added this month" aria-pressed="${response === "Skipped"}">×</button>
-        </div>` : `<div class="list-value"><strong>Not planned</strong></div>`}
+        </div>` : `<div class="list-value"><strong class="${alreadyAdded ? "positive" : ""}">${alreadyAdded ? "Complete" : "Not planned"}</strong></div>`}
       </div>`;
     }).join("")}</div>
-    <button class="button primary monthly-plan-submit" data-submit-monthly-responses ${allMonthlyCategoriesSelected(status.items, month) ? "" : "disabled"}>Submit monthly responses</button>
   </div>`;
 }
 
@@ -717,26 +722,28 @@ function planCompletion(planId, month) {
   return response && (!response.status || response.status === "Completed") ? response : null;
 }
 
-function planAnswered(planId, month) {
-  return Boolean(planResponse(planId, month));
+function monthlyCategoryStatus(categoryId, month) {
+  return monthlyInvestmentPlanStatus(state.data.monthlyPlans, state.data.transactions, state.data.categories, month)
+    .items.find((item) => String(item.categoryId || "") === String(categoryId || ""));
 }
 
-function allPlansAnswered(month) {
-  const plans = state.data.monthlyPlans.filter((plan) => Number(plan.amount || 0) > 0);
-  return plans.length > 0 && plans.every((plan) => planAnswered(plan.id, month));
+function categoryMonthlyCompleted(categoryId, month) {
+  const status = monthlyCategoryStatus(categoryId, month);
+  if (status?.planned > 0 && status.pending <= 0) return true;
+  return monthlyCategoryResponse(categoryId, month) === "Completed";
+}
+
+function allCategoriesResolved(month) {
+  const categoryIds = [...new Set(state.data.monthlyPlans.filter((plan) => Number(plan.amount || 0) > 0).map((plan) => String(plan.categoryId || "")))];
+  return categoryIds.length > 0 && categoryIds.every((categoryId) => categoryMonthlyCompleted(categoryId, month) || monthlyCategoryResponse(categoryId, month) === "Skipped");
 }
 
 function monthlyCategoryResponse(categoryId, month) {
-  if (monthlyResponseDraft.has(categoryId)) return monthlyResponseDraft.get(categoryId);
   const plans = state.data.monthlyPlans.filter((plan) => String(plan.categoryId || "") === String(categoryId || "") && Number(plan.amount || 0) > 0);
   if (!plans.length) return "";
   const responses = plans.map((plan) => planResponse(plan.id, month));
   if (responses.some((response) => !response)) return "";
   return responses.every((response) => !response.status || response.status === "Completed") ? "Completed" : "Skipped";
-}
-
-function allMonthlyCategoriesSelected(items, month) {
-  return items.filter((item) => item.planned > 0).every((item) => monthlyCategoryResponse(item.categoryId, month));
 }
 
 function offsetMonth(month, offset) {
@@ -746,9 +753,11 @@ function offsetMonth(month, offset) {
 }
 
 function planStreak(planId, endingMonth = currentMonth()) {
+  const plan = state.data.monthlyPlans.find((item) => item.id === planId);
+  if (!plan) return 0;
   let streak = 0;
   let month = endingMonth;
-  while (planCompletion(planId, month)) {
+  while (categoryMonthlyCompleted(plan.categoryId, month)) {
     streak += 1;
     month = offsetMonth(month, -1);
   }
@@ -759,7 +768,7 @@ function categoryCompletionStreak(categoryId, endingMonth = currentMonth()) {
   const plans = state.data.monthlyPlans.filter((plan) => String(plan.categoryId || "") === String(categoryId || "") && Number(plan.amount || 0) > 0);
   let streak = 0;
   let month = endingMonth;
-  while (plans.length && plans.every((plan) => planCompletion(plan.id, month))) {
+  while (plans.length && categoryMonthlyCompleted(categoryId, month)) {
     streak += 1;
     month = offsetMonth(month, -1);
   }
@@ -767,10 +776,10 @@ function categoryCompletionStreak(categoryId, endingMonth = currentMonth()) {
 }
 
 function monthlyCompletionStreak(endingMonth = currentMonth()) {
-  const plans = state.data.monthlyPlans.filter((plan) => Number(plan.amount || 0) > 0);
+  const categoryIds = [...new Set(state.data.monthlyPlans.filter((plan) => Number(plan.amount || 0) > 0).map((plan) => String(plan.categoryId || "")))];
   let streak = 0;
   let month = endingMonth;
-  while (plans.length && plans.every((plan) => planCompletion(plan.id, month))) {
+  while (categoryIds.length && categoryIds.every((categoryId) => categoryMonthlyCompleted(categoryId, month))) {
     streak += 1;
     month = offsetMonth(month, -1);
   }
@@ -779,8 +788,8 @@ function monthlyCompletionStreak(endingMonth = currentMonth()) {
 
 function renderPlans() {
   const month = state.filters.planMonth || currentMonth();
-  const completedPlans = state.data.monthlyPlans.filter((plan) => planCompletion(plan.id, month));
-  const answered = allPlansAnswered(month);
+  const completedPlans = state.data.monthlyPlans.filter((plan) => categoryMonthlyCompleted(plan.categoryId, month));
+  const answered = allCategoriesResolved(month);
   const target = state.data.monthlyPlans.reduce((sum, plan) => sum + Number(plan.amount || 0), 0);
   const completed = completedPlans.reduce((sum, plan) => sum + Number(plan.amount || 0), 0);
   const percentage = target > 0 ? (completed / target) * 100 : 0;
@@ -798,8 +807,8 @@ function renderPlans() {
   <section class="card">
     <div class="section-header"><h2>Plan items</h2></div>
     <div class="list">${state.data.monthlyPlans.length ? state.data.monthlyPlans.map((plan) => {
-      const done = Boolean(planCompletion(plan.id, month));
-      const skipped = planResponse(plan.id, month)?.status === "Skipped";
+      const done = categoryMonthlyCompleted(plan.categoryId, month);
+      const skipped = !done && planResponse(plan.id, month)?.status === "Skipped";
       const streak = answered && done ? planStreak(plan.id, month) : 0;
       return `<div class="list-item ${done ? "completed-item" : ""}">
       <span class="completion-button ${done ? "complete" : skipped ? "skipped" : ""}" aria-label="${done ? "Completed" : skipped ? "Not added" : "Pending"}">${done ? "✓" : skipped ? "×" : ""}</span>
@@ -969,6 +978,14 @@ function renderSettings() {
       ${categorySettings("account", "Account types")}
       ${bankSettings()}
       <section class="card">
+        <div class="section-header"><h2>Full Excel workbook</h2></div>
+        <p class="muted">Export every workbook sheet, edit it in Excel or LibreOffice, keep the Excel XML format when saving, then upload it here to replace the workbook data.</p>
+        <div class="button-row">
+          <button class="button secondary" data-action="export-full-workbook">Export full workbook</button>
+          <button class="button primary" data-action="import-full-workbook">Upload edited workbook</button>
+        </div>
+      </section>
+      <section class="card">
         <div class="section-header"><h2>Spreadsheet update</h2></div>
         <p class="muted">Download the Excel-compatible CSV, fill rows marked Include=Yes, then preview and apply it. Each upload replaces earlier imported rows while keeping entries added in the app.</p>
         <div class="button-row">
@@ -1067,10 +1084,10 @@ function blankWorkbookRecord(sheet) {
   }));
 }
 
-function validateWorkbook() {
+function validateWorkbook(recordsByStore = workbookDraft) {
   for (const sheet of WORKBOOK_SHEETS) {
     const ids = new Set();
-    for (const [index, record] of workbookDraft[sheet.id].entries()) {
+    for (const [index, record] of recordsByStore[sheet.id].entries()) {
       for (const column of sheet.columns) {
         const value = record[column.key];
         if (column.required && String(value ?? "").trim() === "") throw new Error(`${sheet.label} row ${index + 1}: ${column.label} is required.`);
@@ -1084,11 +1101,10 @@ function validateWorkbook() {
   }
 }
 
-async function saveWorkbook(exitAfterSave = false) {
-  captureWorkbookSheet();
-  validateWorkbook();
+function prepareWorkbookData(recordsByStore) {
+  const prepared = Object.fromEntries(WORKBOOK_SHEETS.map((sheet) => [sheet.id, structuredClone(recordsByStore[sheet.id] || [])]));
   const savedInvestments = new Map(state.data.investments.map((item) => [item.id, item]));
-  workbookDraft.investments = workbookDraft.investments.map((item) => {
+  prepared.investments = prepared.investments.map((item) => {
     const normalized = { ...item, symbol: normalizeMarketSymbol(item.symbol) };
     const previous = savedInvestments.get(item.id);
     delete normalized.buyPrice;
@@ -1105,10 +1121,20 @@ async function saveWorkbook(exitAfterSave = false) {
     }
     return normalized;
   });
-  await replaceWorkbookData(workbookDraft);
+  validateWorkbook(prepared);
+  return prepared;
+}
+
+async function persistWorkbookData(recordsByStore) {
+  await replaceWorkbookData(prepareWorkbookData(recordsByStore));
+  await loadState();
+}
+
+async function saveWorkbook(exitAfterSave = false) {
+  captureWorkbookSheet();
+  await persistWorkbookData(workbookDraft);
   workbookDirty = false;
   workbookDraft = null;
-  await loadState();
   if (exitAfterSave) routeTo("home");
   else {
     initializeWorkbookDraft();
@@ -1157,6 +1183,10 @@ const renderers = {
 function render() {
   document.body.classList.toggle("workbook-mode", state.route === "spreadsheet");
   pageTitle.textContent = routeTitles[state.route];
+  const streak = monthlyCompletionStreak(currentMonth());
+  streakCount.textContent = String(streak);
+  streakButton.title = streak ? `${streak} month investment streak` : "Check monthly investment streak";
+  streakButton.setAttribute("aria-label", streakButton.title);
   document.querySelectorAll(".nav-item").forEach((item) => {
     const activeRoute = ["transactions", "goals", "plans", "strategy", "networth", "spreadsheet", "settings"].includes(state.route) ? "more" : state.route;
     item.classList.toggle("active", item.dataset.route === activeRoute);
@@ -1883,6 +1913,7 @@ document.querySelector(".bottom-nav").addEventListener("click", (event) => {
 });
 
 document.querySelector("#quick-add-button").addEventListener("click", () => routeTo("spreadsheet"));
+streakButton.addEventListener("click", () => routeTo("plans"));
 
 themeToggleButton.addEventListener("click", async () => {
   const darkTheme = state.settings.theme === "dark" ||
@@ -1895,25 +1926,17 @@ themeToggleButton.addEventListener("click", async () => {
 main.addEventListener("click", async (event) => {
   const monthlyResponseButton = event.target.closest("[data-monthly-response]");
   if (monthlyResponseButton) {
-    monthlyResponseDraft.set(monthlyResponseButton.dataset.categoryId, monthlyResponseButton.dataset.monthlyResponse);
-    renderHome();
-    return;
-  }
-
-  if (event.target.closest("[data-submit-monthly-responses]")) {
     const month = currentMonth();
-    const categoryIds = [...new Set(state.data.monthlyPlans.filter((plan) => Number(plan.amount || 0) > 0).map((plan) => String(plan.categoryId || "")))];
-    const responses = categoryIds.map((categoryId) => ({ categoryId, status: monthlyCategoryResponse(categoryId, month) }));
-    if (responses.some((response) => !response.status)) return showToast("Answer every planned category before submitting.");
+    const categoryId = monthlyResponseButton.dataset.categoryId;
+    const status = monthlyResponseButton.dataset.monthlyResponse;
     try {
-      await saveMonthlyPlanResponses(month, responses, state.data.monthlyPlans, state.data.transactions);
-      monthlyResponseDraft.clear();
+      await saveMonthlyPlanResponses(month, [{ categoryId, status }], state.data.monthlyPlans, state.data.transactions, state.settings.currency);
       await loadState();
       renderHome();
-      showToast("Monthly responses saved. Dashboard, transactions, and streaks updated.");
+      showToast(status === "Completed" ? "Category completed and investment updated." : "Category marked not added this month.");
     } catch (error) {
       console.error(error);
-      showToast(error.message || "Monthly responses could not be saved.");
+      showToast(error.message || "Monthly response could not be saved.");
     }
     return;
   }
@@ -2103,6 +2126,10 @@ main.addEventListener("click", async (event) => {
     if (action === "add-expense") openTransactionForm({}, "Expense");
     if (action === "download-spreadsheet-template") downloadFile("my-wealth-import-template.csv", `\uFEFF${spreadsheetTemplate()}`, "text/csv;charset=utf-8");
     if (action === "import-spreadsheet") spreadsheetInput.click();
+    if (action === "export-full-workbook" && confirm("Export an unencrypted Excel workbook? Anyone with the file can read its financial data.")) {
+      downloadFile(`my-wealth-full-workbook-${today()}.xml`, createExcelWorkbook(state.data, WORKBOOK_SHEETS), "application/vnd.ms-excel;charset=utf-8");
+    }
+    if (action === "import-full-workbook") fullWorkbookInput.click();
     if (action === "export-backup") openBackupExportDialog();
     if (action === "export-readable-backup" && confirm("Export an unencrypted JSON backup? Anyone with the file can read all financial data.")) await exportLegacyBackup();
     if (action === "import-backup") backupInput.click();
@@ -2275,6 +2302,26 @@ spreadsheetInput.addEventListener("change", async () => {
   } catch (error) {
     console.error(error);
     showToast(error.message || "Could not read the spreadsheet.");
+  }
+});
+
+fullWorkbookInput.addEventListener("change", async () => {
+  const [file] = fullWorkbookInput.files;
+  fullWorkbookInput.value = "";
+  if (!file) return;
+  try {
+    const recordsByStore = parseExcelWorkbook(await file.text(), WORKBOOK_SHEETS);
+    validateWorkbook(recordsByStore);
+    const total = WORKBOOK_SHEETS.reduce((sum, sheet) => sum + recordsByStore[sheet.id].length, 0);
+    openDialog("Upload full workbook", `
+      <p class="field-full muted">${escapeHtml(file.name)} contains ${total} records across ${WORKBOOK_SHEETS.length} sheets. Uploading replaces all workbook data on this device. Settings and the market-data API key remain local.</p>
+    `, async () => {
+      await persistWorkbookData(recordsByStore);
+      return `${total} workbook records uploaded.`;
+    }, "Replace workbook data");
+  } catch (error) {
+    console.error(error);
+    showToast(error.message || "Could not read the Excel workbook.");
   }
 });
 
