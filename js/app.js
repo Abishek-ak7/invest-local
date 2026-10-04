@@ -69,6 +69,7 @@ let workbookDirty = false;
 let priceRefreshPromise = null;
 
 const PRICE_CACHE_DURATION = 15 * 60 * 1000;
+const TWELVE_DATA_REQUEST_INTERVAL = 8000;
 
 const routeTitles = {
   home: "Home",
@@ -1668,50 +1669,90 @@ async function refreshInvestmentPrices({ force = false, silent = false } = {}) {
     return;
   }
 
-  const mutualFundCodes = [...new Set(candidates
-    .map((item) => normalizeMarketSymbol(item.symbol))
-    .filter(isMutualFundSchemeCode))];
-  const marketCandidates = candidates.filter((item) => !isMutualFundSchemeCode(item.symbol));
-  const needsUsdInr = marketCandidates.some((item) => String(item.currency || "INR").toUpperCase() === "USD");
-  const symbolLimit = needsUsdInr ? 7 : 8;
-  const marketSymbols = [...new Set(marketCandidates.map((item) => normalizeMarketSymbol(item.symbol)))].slice(0, symbolLimit);
+  const symbols = [...new Set(candidates.map((item) => normalizeMarketSymbol(item.symbol)))];
+  const mutualFundCodes = symbols.filter(isMutualFundSchemeCode);
+  const marketSymbols = symbols.filter((symbol) => !isMutualFundSchemeCode(symbol));
+  const needsUsdInr = candidates.some((item) => !isMutualFundSchemeCode(item.symbol) && String(item.currency || "INR").toUpperCase() === "USD");
   if (!apiKey && marketSymbols.length && !mutualFundCodes.length) {
     if (!silent) throw new Error("Add your Twelve Data API key in Settings first.");
     return;
   }
 
   priceRefreshPromise = (async () => {
-    const [marketPrices, mutualFundNavs, usdInrRate] = await Promise.all([
-      marketSymbols.length && apiKey ? fetchLatestPrices(marketSymbols, apiKey) : Promise.resolve(new Map()),
-      mutualFundCodes.length ? fetchMutualFundNavs(mutualFundCodes) : Promise.resolve(new Map()),
-      needsUsdInr && apiKey ? fetchUsdInrRate(apiKey) : Promise.resolve(0)
-    ]);
-    const priceUpdatedAt = new Date().toISOString();
     let updated = 0;
-    for (const item of state.data.investments) {
-      const symbol = normalizeMarketSymbol(item.symbol);
-      const mutualFundNav = mutualFundNavs.get(symbol);
-      const currentPrice = mutualFundNav?.price || marketPrices.get(symbol);
-      const isUsd = String(item.currency || "INR").toUpperCase() === "USD";
-      if (!currentPrice && !(isUsd && usdInrRate)) continue;
-      const next = { ...item, symbol };
-      if (currentPrice) Object.assign(next, {
-        currentPrice,
-        priceUpdatedAt,
-        priceAsOf: mutualFundNav?.date || "",
-        priceSource: mutualFundNav ? "MFAPI / AMFI" : "Twelve Data"
-      });
-      if (isUsd && usdInrRate) Object.assign(next, { exchangeRate: usdInrRate, exchangeRateUpdatedAt: priceUpdatedAt });
-      delete next.currentValue;
-      delete next.buyPrice;
-      await putOne("investments", next);
-      updated += 1;
+    let failed = 0;
+    let usdInrRate = 0;
+
+    const persistSymbol = async (symbol, currentPrice, metadata = {}) => {
+      const priceUpdatedAt = new Date().toISOString();
+      const matching = state.data.investments.filter((item) => normalizeMarketSymbol(item.symbol) === symbol);
+      for (const item of matching) {
+        const next = {
+          ...item,
+          symbol,
+          currentPrice,
+          priceUpdatedAt,
+          priceAsOf: metadata.date || "",
+          priceSource: metadata.source || "Twelve Data"
+        };
+        if (String(item.currency || "INR").toUpperCase() === "USD" && usdInrRate) {
+          Object.assign(next, { exchangeRate: usdInrRate, exchangeRateUpdatedAt: priceUpdatedAt });
+        }
+        delete next.currentValue;
+        delete next.buyPrice;
+        await putOne("investments", next);
+        updated += 1;
+      }
+      await loadState();
+      if (["home", "investments", "networth"].includes(state.route)) render();
+    };
+
+    for (const schemeCode of mutualFundCodes) {
+      try {
+        const nav = (await fetchMutualFundNavs([schemeCode])).get(schemeCode);
+        if (!nav) throw new Error(`No NAV returned for ${schemeCode}.`);
+        await persistSymbol(schemeCode, nav.price, { date: nav.date, source: "MFAPI / AMFI" });
+      } catch (error) {
+        console.error(`Could not update mutual fund ${schemeCode}:`, error);
+        failed += 1;
+      }
     }
-    await loadState();
-    if (["home", "investments", "networth"].includes(state.route)) render();
+
+    if (needsUsdInr && apiKey) {
+      try {
+        usdInrRate = await fetchUsdInrRate(apiKey);
+        const exchangeRateUpdatedAt = new Date().toISOString();
+        for (const item of state.data.investments.filter((entry) => String(entry.currency || "INR").toUpperCase() === "USD")) {
+          await putOne("investments", { ...item, exchangeRate: usdInrRate, exchangeRateUpdatedAt });
+        }
+        await loadState();
+        if (["home", "investments", "networth"].includes(state.route)) render();
+      } catch (error) {
+        console.error("Could not update USD/INR:", error);
+        failed += 1;
+      }
+      if (marketSymbols.length) await new Promise((resolve) => setTimeout(resolve, TWELVE_DATA_REQUEST_INTERVAL));
+    }
+
+    for (const [index, symbol] of marketSymbols.entries()) {
+      if (!apiKey) break;
+      try {
+        const currentPrice = (await fetchLatestPrices([symbol], apiKey)).get(symbol);
+        if (!currentPrice) throw new Error(`No price returned for ${symbol}.`);
+        await persistSymbol(symbol, currentPrice);
+      } catch (error) {
+        console.error(`Could not update market symbol ${symbol}:`, error);
+        failed += 1;
+      }
+      if (index < marketSymbols.length - 1) {
+        await new Promise((resolve) => setTimeout(resolve, TWELVE_DATA_REQUEST_INTERVAL));
+      }
+    }
+
     if (!silent) {
       const skipped = marketSymbols.length && !apiKey ? " Add an API key to update stocks and ETFs." : "";
-      showToast(`${updated} investment market value${updated === 1 ? "" : "s"} updated.${skipped}`);
+      const failures = failed ? ` ${failed} update${failed === 1 ? "" : "s"} failed.` : "";
+      showToast(`${updated} investment market value${updated === 1 ? "" : "s"} updated.${failures}${skipped}`);
     }
   })();
 
@@ -2122,6 +2163,17 @@ spreadsheetInput.addEventListener("change", async () => {
 });
 
 window.addEventListener("popstate", handleHistoryNavigation);
+
+window.addEventListener("online", () => {
+  if (!state.settings) return;
+  showToast("Back online. Updating investment values one by one.");
+  refreshInvestmentPrices({ force: true }).catch((error) => {
+    console.error(error);
+    showToast(error.message || "Investment updates could not finish.");
+  });
+});
+
+window.addEventListener("offline", () => showToast("Offline. Cached investment values remain available."));
 
 document.addEventListener("visibilitychange", () => {
   document.body.classList.toggle("app-private", document.hidden);
