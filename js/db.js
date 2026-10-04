@@ -169,6 +169,29 @@ export async function putOne(storeName, value) {
   return value;
 }
 
+export async function recordExpense(expense) {
+  const amount = Number(expense.amount);
+  if (!expense.accountId) throw new Error("Choose the bank account used for this expense.");
+  if (!Number.isFinite(amount) || amount <= 0) throw new Error("Expense amount must be greater than zero.");
+
+  const database = await openDatabase();
+  const transaction = database.transaction(["accounts", "transactions"], "readwrite");
+  const completion = transactionDone(transaction);
+  const accountStore = transaction.objectStore("accounts");
+  const account = await requestToPromise(accountStore.get(expense.accountId));
+  if (!account) {
+    transaction.abort();
+    await completion.catch(() => {});
+    throw new Error("The selected bank account no longer exists.");
+  }
+
+  account.balance = Number(account.balance || 0) - amount;
+  accountStore.put(account);
+  transaction.objectStore("transactions").add({ ...expense, amount });
+  await completion;
+  return expense;
+}
+
 export async function deleteOne(storeName, id) {
   const database = await openDatabase();
   const transaction = database.transaction(storeName, "readwrite");

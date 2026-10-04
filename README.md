@@ -71,7 +71,7 @@ Use the workbook **Categories** sheet to add, rename, or delete investment categ
 
 Current allocation is calculated automatically from investment holdings and appears in the dashboard and Investments page. Investment categories contain no target or manual actual-amount fields. Cash, Bonds, Foreign Stocks, and ETFs remain separate categories. Chart colors are assigned automatically.
 
-Net worth is calculated as bank-account balances plus current investment values minus remaining liabilities. Add a free Twelve Data API key in Settings, then use provider symbols such as `RELIANCE:NSE` in the Investments sheet. Opening Investments refreshes quotes older than 15 minutes, and **Refresh prices** requests an immediate update. Current value is calculated as quantity × fetched price. The last successful quote remains stored for offline use; until the first quote arrives, the invested amount is used so net worth does not disappear.
+Net worth is calculated as bank-account balances plus current investment values minus remaining liabilities. Add a free Twelve Data API key in Settings, then use provider symbols such as `RELIANCE:NSE`, `AAPL`, or `VOO` in the Investments sheet. Set foreign US holdings to `USD`. Opening Investments refreshes quotes and the live USD/INR rate when they are older than 15 minutes; **Refresh prices** requests an immediate update. INR current value is calculated as quantity × fetched USD price × USD/INR rate. The last successful quote and exchange rate remain stored for offline use; until both arrive, the invested amount is used so net worth does not disappear.
 
 The API key stays in this browser's IndexedDB and is excluded from all backup exports. Quote requests send only market symbols to Twelve Data; account names, balances, invested amounts, and other financial records remain local.
 
@@ -81,9 +81,13 @@ The dashboard Liabilities card shows remaining debt and combined monthly payment
 
 Open **More → Monthly plan** to view recurring transfer or investment tasks and completion history. Edit tasks in the workbook **Plans** sheet and monthly completion records in **Plan Checks**.
 
+## Recording expenses
+
+Use **Add expense** on the Expenses page to enter the amount, category, bank account, date, and description. Saving atomically adds the expense transaction and deducts the same amount from the selected bank-account balance. The expense row shows its linked account; if either database update fails, neither change is saved.
+
 ## Accounts, cards, and investment products
 
-- **Accounts** displays bank accounts and credit cards in separate sections. Credit cards show their linked bank and credit limit.
+- **Accounts** displays bank accounts and current credit cards in separate sections. Future cards remain available only in the workbook **Cards** sheet and do not appear in read-only views or credit-limit totals.
 - **More → Investment plan** tracks funds, ETFs, stocks, metals, debt, cash, crypto, tickers, charges, monthly amounts, exposure, and status.
 
 Edit these records through the workbook **Accounts**, **Cards**, and **Products** sheets.

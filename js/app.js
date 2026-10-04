@@ -8,6 +8,7 @@ import {
   importAllData,
   initializeDatabase,
   putOne,
+  recordExpense,
   replaceImportedData,
   replaceWorkbookData,
   resetToDefaults
@@ -27,7 +28,7 @@ import {
   totalInvested,
   totalProfit
 } from "./calculations.js";
-import { fetchLatestPrices, normalizeMarketSymbol } from "./market-data.js";
+import { fetchLatestPrices, fetchUsdInrRate, normalizeMarketSymbol } from "./market-data.js";
 import { parseSpreadsheet, spreadsheetTemplate } from "./spreadsheet.js";
 
 const main = document.querySelector("#main-content");
@@ -160,10 +161,10 @@ function escapeHtml(value = "") {
     .replaceAll("'", "&#039;");
 }
 
-function formatMoney(value, compact = false) {
+function formatMoney(value, compact = false, currency = state.settings?.currency || "INR") {
   return new Intl.NumberFormat(state.settings?.locale || "en-IN", {
     style: "currency",
-    currency: state.settings?.currency || "INR",
+    currency,
     maximumFractionDigits: compact ? 0 : 2,
     notation: compact && Math.abs(Number(value)) >= 1000000 ? "compact" : "standard"
   }).format(Number(value) || 0);
@@ -473,7 +474,7 @@ function renderInvestments() {
           <div class="list-main">
             <strong>${escapeHtml(item.name)}${item.import?.managed ? ` <span class="status-badge">Imported</span>` : ""}</strong>
             <small>${escapeHtml(categoryName(item.categoryId))} · ${escapeHtml(accountName(item.accountId))} · ${formatDate(item.purchaseDate)}</small>
-            <small>${item.symbol ? `${escapeHtml(normalizeMarketSymbol(item.symbol))} · ${item.currentPrice ? `${formatMoney(item.currentPrice)} per unit` : "Price pending"}${item.priceUpdatedAt ? ` · Updated ${escapeHtml(new Date(item.priceUpdatedAt).toLocaleString(state.settings.locale))}` : ""}` : "No market symbol"}</small>
+            <small>${item.symbol ? `${escapeHtml(normalizeMarketSymbol(item.symbol))} · ${item.currentPrice ? `${formatMoney(item.currentPrice, false, item.currency || "INR")} per unit` : "Price pending"}${String(item.currency || "INR").toUpperCase() === "USD" && item.exchangeRate ? ` · USD/INR ${Number(item.exchangeRate).toFixed(4)}` : ""}${item.priceUpdatedAt ? ` · Updated ${escapeHtml(new Date(item.priceUpdatedAt).toLocaleString(state.settings.locale))}` : ""}` : "No market symbol"}</small>
           </div>
           <div class="list-value">
             <strong>${formatMoney(values.currentValue)}</strong>
@@ -541,7 +542,7 @@ function renderExpenses() {
       </section>
     </div>
     <section class="card">
-      <div class="section-header"><h2>Expenses</h2></div>
+      <div class="section-header"><h2>Expenses</h2><button class="button primary" data-action="add-expense">＋ Add expense</button></div>
       <div class="filter-row">
         <input type="search" id="expense-search" placeholder="Search expenses" value="${escapeHtml(state.filters.expense)}">
         <select id="expense-category-filter" aria-label="Expense category filter">
@@ -550,7 +551,7 @@ function renderExpenses() {
         <input type="month" id="expense-month" value="${escapeHtml(month)}" aria-label="Expense month">
       </div>
       <div class="list">${items.length ? items.map((item) => `<div class="list-item">
-        <div class="list-main"><strong>${escapeHtml(item.description || categoryName(item.categoryId))}${item.import?.managed ? ` <span class="status-badge">Imported</span>` : ""}</strong><small>${escapeHtml(categoryName(item.categoryId))} · ${formatDate(item.date)}</small></div>
+        <div class="list-main"><strong>${escapeHtml(item.description || categoryName(item.categoryId))}${item.import?.managed ? ` <span class="status-badge">Imported</span>` : ""}</strong><small>${escapeHtml(categoryName(item.categoryId))} · ${escapeHtml(accountName(item.accountId))} · ${formatDate(item.date)}</small></div>
         <strong class="negative">${formatMoney(item.amount)}</strong>
       </div>`).join("") : emptyState("No expenses found.")}</div>
     </section>
@@ -560,7 +561,8 @@ function renderExpenses() {
 function renderAccounts() {
   const totalBalance = state.data.accounts.reduce((sum, item) => sum + Number(item.balance || 0), 0);
   const totalMonthly = state.data.accounts.reduce((sum, item) => sum + Number(item.monthlyAllocation || 0), 0);
-  const totalCreditLimit = state.data.cards.reduce((sum, card) => sum + Number(card.creditLimit || 0), 0);
+  const currentCards = state.data.cards.filter((card) => (card.status || "Current") === "Current");
+  const totalCreditLimit = currentCards.reduce((sum, card) => sum + Number(card.creditLimit || 0), 0);
   main.className = "";
   main.innerHTML = `
     <section class="metric-grid">
@@ -579,12 +581,12 @@ function renderAccounts() {
     </section>
     <section class="card">
       <div class="section-header"><h2>Credit cards</h2></div>
-      <div class="list">${state.data.cards.length ? state.data.cards.map((card) => `<div class="list-item">
+      <div class="list">${currentCards.length ? currentCards.map((card) => `<div class="list-item">
         <span class="entity-icon" aria-hidden="true">${escapeHtml(card.icon || "💳")}</span>
         ${card.bankId ? bankMark(bankById(card.bankId), "bank-mark-small") : ""}
         <div class="list-main"><strong>${escapeHtml(card.name)} <span class="status-badge">${escapeHtml(card.status || "Current")}</span></strong><small>${escapeHtml(bankName(card.bankId) || card.bank || "Bank not selected")}</small></div>
         <div class="list-value"><strong>${formatMoney(card.creditLimit)}</strong><small>Credit limit</small></div>
-      </div>`).join("") : emptyState("No credit cards yet.")}</div>
+      </div>`).join("") : emptyState("No current credit cards.")}</div>
     </section>
   `;
 }
@@ -996,6 +998,10 @@ async function saveWorkbook(exitAfterSave = false) {
       delete normalized.currentPrice;
       delete normalized.priceUpdatedAt;
     }
+    if (String(normalized.currency || "INR").toUpperCase() !== "USD") {
+      delete normalized.exchangeRate;
+      delete normalized.exchangeRateUpdatedAt;
+    }
     return normalized;
   });
   await replaceWorkbookData(workbookDraft);
@@ -1199,25 +1205,31 @@ function openTransactionForm(item = {}, forcedType) {
   const types = ["Investment", "Withdrawal", "Dividend", "Interest", "Expense", "Income", "Transfer"];
   const categoryGroup = type === "Expense" ? "expense" : "investment";
   openDialog(item.id ? `Edit ${type.toLowerCase()}` : `Add ${type.toLowerCase()}`, `
-    ${selectField("type", "Type", types.map((entry) => `<option value="${entry}" ${entry === type ? "selected" : ""}>${entry}</option>`).join(""))}
+    ${forcedType ? `<input type="hidden" name="type" value="${escapeHtml(forcedType)}">` : selectField("type", "Type", types.map((entry) => `<option value="${entry}" ${entry === type ? "selected" : ""}>${entry}</option>`).join(""))}
     ${field("date", "Date", "date", item.date || today(), { required: true })}
     ${field("amount", "Amount", "number", item.amount, { required: true, min: 0, step: "0.01" })}
     ${selectField("categoryId", "Category", forcedType ? `<option value="">Uncategorized</option>${categoryOptions(categoryGroup, item.categoryId)}` : transactionCategoryOptions(item.categoryId))}
-    ${selectField("accountId", "Account", accountOptions(item.accountId))}
+    ${forcedType === "Expense" ? `<label><span>Bank account</span><select name="accountId" required>${accountOptions(item.accountId)}</select></label>` : selectField("accountId", "Account", accountOptions(item.accountId))}
     ${field("description", "Description", "text", item.description, { full: true })}
     ${textArea("notes", "Notes", item.notes)}
   `, async (formData) => {
-    await putOne("transactions", {
+    const transaction = {
       ...item,
       id: item.id || createId("transaction"),
-      type: formValue(formData, "type"),
+      type: forcedType || formValue(formData, "type"),
       date: formValue(formData, "date"),
       amount: Number(formValue(formData, "amount")),
       categoryId: formValue(formData, "categoryId"),
       accountId: formValue(formData, "accountId"),
       description: formValue(formData, "description"),
       notes: formValue(formData, "notes")
-    });
+    };
+    if (forcedType === "Expense" && !item.id) {
+      await recordExpense(transaction);
+      await createNetWorthSnapshot();
+      return "Expense added and bank balance updated.";
+    }
+    await putOne("transactions", transaction);
   });
 }
 
@@ -1637,8 +1649,12 @@ async function refreshInvestmentPrices({ force = false, silent = false } = {}) {
   const now = Date.now();
   const candidates = state.data.investments.filter((item) => {
     if (!normalizeMarketSymbol(item.symbol)) return false;
-    const updatedAt = Date.parse(item.priceUpdatedAt || "");
-    return force || !Number.isFinite(updatedAt) || now - updatedAt >= PRICE_CACHE_DURATION;
+    const priceUpdatedAt = Date.parse(item.priceUpdatedAt || "");
+    const exchangeRateUpdatedAt = Date.parse(item.exchangeRateUpdatedAt || "");
+    const priceStale = !Number.isFinite(priceUpdatedAt) || now - priceUpdatedAt >= PRICE_CACHE_DURATION;
+    const exchangeRateStale = String(item.currency || "INR").toUpperCase() === "USD" &&
+      (!Number.isFinite(exchangeRateUpdatedAt) || now - exchangeRateUpdatedAt >= PRICE_CACHE_DURATION);
+    return force || priceStale || exchangeRateStale;
   });
   if (!candidates.length) {
     if (!silent) showToast("Investment prices are already current.");
@@ -1646,15 +1662,23 @@ async function refreshInvestmentPrices({ force = false, silent = false } = {}) {
   }
 
   priceRefreshPromise = (async () => {
-    const symbols = [...new Set(candidates.map((item) => normalizeMarketSymbol(item.symbol)))].slice(0, 8);
-    const prices = await fetchLatestPrices(symbols, apiKey);
+    const needsUsdInr = candidates.some((item) => String(item.currency || "INR").toUpperCase() === "USD");
+    const symbolLimit = needsUsdInr ? 7 : 8;
+    const symbols = [...new Set(candidates.map((item) => normalizeMarketSymbol(item.symbol)))].slice(0, symbolLimit);
+    const [prices, usdInrRate] = await Promise.all([
+      fetchLatestPrices(symbols, apiKey),
+      needsUsdInr ? fetchUsdInrRate(apiKey) : Promise.resolve(0)
+    ]);
     const priceUpdatedAt = new Date().toISOString();
     let updated = 0;
     for (const item of state.data.investments) {
       const symbol = normalizeMarketSymbol(item.symbol);
       const currentPrice = prices.get(symbol);
-      if (!currentPrice) continue;
-      const next = { ...item, symbol, currentPrice, priceUpdatedAt };
+      const isUsd = String(item.currency || "INR").toUpperCase() === "USD";
+      if (!currentPrice && !(isUsd && usdInrRate)) continue;
+      const next = { ...item, symbol };
+      if (currentPrice) Object.assign(next, { currentPrice, priceUpdatedAt });
+      if (isUsd && usdInrRate) Object.assign(next, { exchangeRate: usdInrRate, exchangeRateUpdatedAt: priceUpdatedAt });
       delete next.currentValue;
       delete next.buyPrice;
       await putOne("investments", next);
@@ -1662,7 +1686,7 @@ async function refreshInvestmentPrices({ force = false, silent = false } = {}) {
     }
     await loadState();
     if (["home", "investments", "networth"].includes(state.route)) render();
-    if (!silent) showToast(`${updated} investment price${updated === 1 ? "" : "s"} updated.`);
+    if (!silent) showToast(`${updated} investment market value${updated === 1 ? "" : "s"} updated.`);
   })();
 
   try {
@@ -1893,6 +1917,7 @@ main.addEventListener("click", async (event) => {
   const action = event.target.closest("[data-action]")?.dataset.action;
   if (!action) return;
   try {
+    if (action === "add-expense") openTransactionForm({}, "Expense");
     if (action === "download-spreadsheet-template") downloadFile("my-wealth-import-template.csv", `\uFEFF${spreadsheetTemplate()}`, "text/csv;charset=utf-8");
     if (action === "import-spreadsheet") spreadsheetInput.click();
     if (action === "export-backup") openBackupExportDialog();

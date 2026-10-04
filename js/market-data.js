@@ -1,4 +1,5 @@
 const PRICE_ENDPOINT = "https://api.twelvedata.com/price";
+const EXCHANGE_RATE_ENDPOINT = "https://api.twelvedata.com/exchange_rate";
 const MAX_SYMBOLS_PER_REQUEST = 8;
 
 export function normalizeMarketSymbol(value) {
@@ -32,4 +33,19 @@ export async function fetchLatestPrices(symbols, apiKey) {
   }
   if (!prices.size) throw new Error("No prices were returned. Check the investment symbols.");
   return prices;
+}
+
+export async function fetchUsdInrRate(apiKey) {
+  if (!String(apiKey || "").trim()) throw new Error("Add your Twelve Data API key in Settings first.");
+  const query = new URLSearchParams({ symbol: "USD/INR", apikey: String(apiKey).trim() });
+  const response = await fetch(`${EXCHANGE_RATE_ENDPOINT}?${query}`, {
+    headers: { Accept: "application/json" },
+    referrerPolicy: "no-referrer"
+  });
+  const payload = await response.json().catch(() => null);
+  const rate = Number(payload?.rate);
+  if (!response.ok || payload?.status === "error" || !Number.isFinite(rate) || rate <= 0) {
+    throw new Error(payload?.message || "The live USD to INR rate is unavailable right now.");
+  }
+  return rate;
 }
