@@ -90,6 +90,9 @@ const workbookSelects = {
   account: () => [{ value: "", label: "None" }, ...(workbookDraft?.accounts || state.data.accounts).map((item) => ({ value: item.id, label: item.name }))],
   accountCategory: () => (workbookDraft?.categories || state.data.categories).filter((item) => item.group === "account").map((item) => ({ value: item.id, label: item.name })),
   investmentCategory: () => (workbookDraft?.categories || state.data.categories).filter((item) => item.group === "investment").map((item) => ({ value: item.id, label: item.name })),
+  investmentProduct: () => [{ value: "", label: "Select product" }, ...(workbookDraft?.investmentProducts || state.data.investmentProducts)
+    .slice().sort((a, b) => a.name.localeCompare(b.name))
+    .map((item) => ({ value: item.name, label: item.ticker ? `${item.name} · ${item.ticker}` : item.name }))],
   anyCategory: () => [{ value: "", label: "None" }, ...(workbookDraft?.categories || state.data.categories).map((item) => ({ value: item.id, label: `${item.group} · ${item.name}` }))],
   plan: () => [{ value: "", label: "None" }, ...(workbookDraft?.monthlyPlans || state.data.monthlyPlans).map((item) => ({ value: item.id, label: item.name }))]
 };
@@ -101,7 +104,7 @@ const WORKBOOK_SHEETS = [
     { key: "purpose", label: "Purpose" }, { key: "notes", label: "Notes" }, { key: "currency", label: "Currency", values: ["INR", "USD", "EUR", "GBP", "AED", "SGD"], default: "INR" }
   ] },
   { id: "investments", label: "Investments", icon: "📈", prefix: "investment", columns: [
-    { key: "id", label: "ID", required: true }, { key: "name", label: "Name", required: true }, { key: "categoryId", label: "Category", options: workbookSelects.investmentCategory, required: true }, { key: "accountId", label: "Account", options: workbookSelects.account },
+    { key: "id", label: "ID", required: true }, { key: "name", label: "Investment name", options: workbookSelects.investmentProduct, required: true }, { key: "categoryId", label: "Category", options: workbookSelects.investmentCategory, required: true }, { key: "accountId", label: "Account", options: workbookSelects.account },
     { key: "symbol", label: "Market symbol" }, { key: "quantity", label: "Quantity", type: "number" }, { key: "investedAmount", label: "Invested (native currency)", type: "number" },
     { key: "purchaseDate", label: "Purchase date", type: "date" }, { key: "notes", label: "Notes" }, { key: "currency", label: "Currency", values: ["INR", "USD", "EUR", "GBP", "AED", "SGD"], default: "INR" }
   ] },
@@ -127,7 +130,7 @@ const WORKBOOK_SHEETS = [
     { key: "id", label: "ID", required: true }, { key: "name", label: "Card", required: true }, { key: "icon", label: "Icon" }, { key: "status", label: "Status", values: ["Current", "Future"], default: "Current" }, { key: "bankId", label: "Bank", options: workbookSelects.bank }, { key: "creditLimit", label: "Credit limit", type: "number" }, { key: "purpose", label: "Purpose" }, { key: "notes", label: "Notes" }
   ] },
   { id: "investmentProducts", label: "Products", icon: "◇", prefix: "product", columns: [
-    { key: "id", label: "ID", required: true }, { key: "name", label: "Product", required: true }, { key: "ticker", label: "Ticker" }, { key: "categoryId", label: "Category", options: workbookSelects.investmentCategory }, { key: "monthlyAmount", label: "Monthly amount", type: "number" }, { key: "charges", label: "Charges %", type: "number" }, { key: "status", label: "Status", values: ["Planned", "Active", "Paused", "Completed"], default: "Planned" }, { key: "exposure", label: "Exposure" }, { key: "notes", label: "Notes" }
+    { key: "id", label: "ID", required: true }, { key: "name", label: "Product", required: true }, { key: "ticker", label: "Ticker" }, { key: "categoryId", label: "Category", options: workbookSelects.investmentCategory }, { key: "currency", label: "Currency", values: ["INR", "USD"], default: "INR" }, { key: "monthlyAmount", label: "Monthly amount", type: "number" }, { key: "charges", label: "Charges %", type: "number" }, { key: "status", label: "Status", values: ["Planned", "Active", "Paused", "Completed"], default: "Planned" }, { key: "exposure", label: "Exposure" }, { key: "notes", label: "Notes" }
   ] },
   { id: "categories", label: "Categories", icon: "▤", prefix: "category", columns: [
     { key: "id", label: "ID", required: true }, { key: "group", label: "Group", values: ["investment", "expense", "account"], required: true }, { key: "name", label: "Name", required: true }, { key: "icon", label: "Icon" }, { key: "budget", label: "Monthly budget", type: "number" }
@@ -2007,6 +2010,23 @@ main.addEventListener("input", async (event) => {
 });
 
 main.addEventListener("change", async (event) => {
+  if (activeWorkbookSheet === "investments" && event.target.matches('[data-workbook-cell][data-key="name"]')) {
+    const product = workbookDraft.investmentProducts.find((item) => item.name === event.target.value);
+    const row = event.target.closest("[data-workbook-row]");
+    if (product && row) {
+      const values = {
+        categoryId: product.categoryId || "inv-other",
+        symbol: normalizeMarketSymbol(product.ticker),
+        currency: product.currency || (product.categoryId === "inv-foreign" ? "USD" : "INR")
+      };
+      for (const [key, value] of Object.entries(values)) {
+        const cell = row.querySelector(`[data-workbook-cell][data-key="${key}"]`);
+        if (cell) cell.value = value;
+      }
+      workbookDirty = true;
+      main.querySelector(".workbook-actions .status-badge").textContent = "Unsaved changes";
+    }
+  }
   if (event.target.id === "investment-category-filter") {
     state.filters.investmentCategory = event.target.value;
     renderInvestments();

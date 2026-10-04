@@ -88,7 +88,7 @@ Use **Add expense** on the Expenses page to enter the amount, category, bank acc
 ## Accounts, cards, and investment products
 
 - **Accounts** displays bank accounts and current credit cards in separate sections. Future cards remain available only in the workbook **Cards** sheet and do not appear in read-only views or credit-limit totals.
-- **More → Investment plan** tracks funds, ETFs, stocks, metals, debt, cash, crypto, tickers, charges, monthly amounts, exposure, and status.
+- **More → Investment plan** tracks funds, ETFs, stocks, metals, debt, cash, crypto, tickers, currency, charges, monthly amounts, exposure, and status. In the workbook **Investments** sheet, Investment Name is a Products dropdown; selecting a product fills its category, ticker, and currency before quantity and invested amount are entered.
 
 Edit these records through the workbook **Accounts**, **Cards**, and **Products** sheets.
 
