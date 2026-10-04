@@ -68,7 +68,7 @@ let workbookDirty = false;
 const routeTitles = {
   home: "Home",
   investments: "Investments",
-  "investment-categories": "Investment Categories",
+  "investment-categories": "Allocation Targets",
   expenses: "Expenses",
   accounts: "Accounts",
   more: "More",
@@ -94,7 +94,7 @@ const workbookSelects = {
 const WORKBOOK_SHEETS = [
   { id: "accounts", label: "Accounts", icon: "🏦", prefix: "account", columns: [
     { key: "id", label: "ID", required: true }, { key: "name", label: "Name", required: true }, { key: "bankId", label: "Bank", options: workbookSelects.bank }, { key: "typeId", label: "Account type", options: workbookSelects.accountCategory, required: true },
-    { key: "balance", label: "Balance", type: "number" }, { key: "targetBalance", label: "Target", type: "number" }, { key: "minimumBalance", label: "Minimum", type: "number" }, { key: "monthlyAllocation", label: "Monthly allocation", type: "number" },
+    { key: "balance", label: "Balance", type: "number" }, { key: "minimumBalance", label: "Minimum", type: "number" }, { key: "monthlyAllocation", label: "Monthly allocation", type: "number" },
     { key: "purpose", label: "Purpose" }, { key: "notes", label: "Notes" }, { key: "currency", label: "Currency", values: ["INR", "USD", "EUR", "GBP", "AED", "SGD"], default: "INR" }
   ] },
   { id: "investments", label: "Investments", icon: "📈", prefix: "investment", columns: [
@@ -126,8 +126,11 @@ const WORKBOOK_SHEETS = [
   { id: "investmentProducts", label: "Products", icon: "◇", prefix: "product", columns: [
     { key: "id", label: "ID", required: true }, { key: "name", label: "Product", required: true }, { key: "ticker", label: "Ticker" }, { key: "categoryId", label: "Category", options: workbookSelects.investmentCategory }, { key: "monthlyAmount", label: "Monthly amount", type: "number" }, { key: "charges", label: "Charges %", type: "number" }, { key: "status", label: "Status", values: ["Planned", "Active", "Paused", "Completed"], default: "Planned" }, { key: "exposure", label: "Exposure" }, { key: "notes", label: "Notes" }
   ] },
+  { id: "targets", label: "Targets", icon: "◎", fixedRows: true, columns: [
+    { key: "name", label: "Category", readonly: true }, { key: "targetAmount", label: "Target", type: "number", required: true }
+  ] },
   { id: "categories", label: "Categories", icon: "▤", prefix: "category", columns: [
-    { key: "id", label: "ID", required: true }, { key: "group", label: "Group", values: ["investment", "expense", "account"], required: true }, { key: "name", label: "Name", required: true }, { key: "icon", label: "Icon" }, { key: "targetAmount", label: "Target amount", type: "number" }, { key: "actualAmount", label: "Actual amount", type: "number" }, { key: "budget", label: "Monthly budget", type: "number" }
+    { key: "id", label: "ID", required: true }, { key: "group", label: "Group", values: ["investment", "expense", "account"], required: true }, { key: "name", label: "Name", required: true }, { key: "icon", label: "Icon" }, { key: "budget", label: "Monthly budget", type: "number" }
   ] },
   { id: "banks", label: "Banks", icon: "🏛", prefix: "bank", columns: [
     { key: "id", label: "ID", required: true }, { key: "name", label: "Bank name", required: true }, { key: "shortName", label: "Logo text", required: true }, { key: "color", label: "Logo color", type: "color", default: "#176b5b" }, { key: "aliases", label: "Aliases", array: true }
@@ -326,81 +329,37 @@ function transactionList(items, limit) {
 
 function allocationMarkup() {
   const allocation = assetAllocation(state.data.investments, state.data.categories);
-  const chart = (mode, title) => {
-    const percentageKey = mode === "target" ? "target" : "actual";
-    const amountKey = mode === "target" ? "targetAmount" : "value";
-    const populated = allocation.filter((item) => item[percentageKey] > 0);
-    const totalAmount = populated.reduce((sum, item) => sum + Number(item[amountKey] || 0), 0);
-    const chartDescription = populated.length
-      ? `${title}: ${populated.map((item) => `${item.name} ${item[percentageKey].toFixed(1)} percent`).join(", ")}`
-      : `${title}: no amounts entered`;
-    let start = 0;
-    const gradient = populated.length
-      ? populated.map((item) => {
-        const end = start + item[percentageKey];
-        const segment = `${item.color} ${start.toFixed(2)}% ${end.toFixed(2)}%`;
-        start = end;
-        return segment;
-      }).join(", ")
-      : "var(--border) 0 100%";
+  const populated = allocation.filter((item) => item.actual > 0);
+  const totalAmount = populated.reduce((sum, item) => sum + Number(item.value || 0), 0);
+  const chartDescription = populated.length
+    ? `Current allocation: ${populated.map((item) => `${item.name} ${item.actual.toFixed(1)} percent`).join(", ")}`
+    : "Current allocation: no holdings entered";
+  let start = 0;
+  const gradient = populated.length
+    ? populated.map((item) => {
+      const end = start + item.actual;
+      const segment = `${item.color} ${start.toFixed(2)}% ${end.toFixed(2)}%`;
+      start = end;
+      return segment;
+    }).join(", ")
+    : "var(--border) 0 100%";
 
-    return `<div class="allocation-panel">
-      <h3>${title}</h3>
-      <p class="allocation-total">Total ${formatMoney(totalAmount)}</p>
-      <div class="donut" role="img" aria-label="${escapeHtml(chartDescription)}" data-label="${mode === "target" ? "Target" : "Actual"}" style="background: conic-gradient(${gradient})"></div>
-      <div class="allocation-bars">${populated.length ? populated.map((item) => `<div class="allocation-bar-row">
-        <div class="allocation-bar-label">
-          <span class="swatch" style="background:${escapeHtml(item.color)}"></span>
-          <span aria-hidden="true">${escapeHtml(item.icon || "📌")}</span>
-          <span>${escapeHtml(item.name)}</span>
-          <strong>${formatMoney(item[amountKey])} · ${item[percentageKey].toFixed(1)}%</strong>
-        </div>
-        <div class="progress allocation-progress" role="progressbar" aria-label="${escapeHtml(`${item.name} ${title.toLowerCase()}`)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${item[percentageKey].toFixed(1)}">
-          <span style="width:${item[percentageKey].toFixed(2)}%;background:${escapeHtml(item.color)}"></span>
-        </div>
-      </div>`).join("") : emptyState(`No ${mode} amounts entered.`)}</div>
-    </div>`;
-  };
-
-  const comparisonItems = allocation.filter((item) => item.target > 0 || item.actual > 0);
-  const comparison = `<div class="allocation-variance">
-    <div class="section-header">
-      <div>
-        <h3>Target vs actual comparison</h3>
-        <p class="muted allocation-help">Positive variance is above target; negative variance is below target.</p>
+  return `<div class="allocation-comparison allocation-current-only"><div class="allocation-panel">
+    <h3>Current allocation</h3>
+    <p class="allocation-total">Total ${formatMoney(totalAmount)}</p>
+    <div class="donut" role="img" aria-label="${escapeHtml(chartDescription)}" data-label="Current" style="background: conic-gradient(${gradient})"></div>
+    <div class="allocation-bars">${populated.length ? populated.map((item) => `<div class="allocation-bar-row">
+      <div class="allocation-bar-label">
+        <span class="swatch" style="background:${escapeHtml(item.color)}"></span>
+        <span aria-hidden="true">${escapeHtml(item.icon || "📌")}</span>
+        <span>${escapeHtml(item.name)}</span>
+        <strong>${formatMoney(item.value)} · ${item.actual.toFixed(1)}%</strong>
       </div>
-    </div>
-    <div class="allocation-variance-list">${comparisonItems.length ? comparisonItems.map((item) => {
-      const differenceClass = Math.abs(item.difference) < 0.05 ? "" : item.difference > 0 ? "positive" : "negative";
-      return `<div class="allocation-variance-row">
-        <div class="allocation-variance-heading">
-          <span aria-hidden="true">${escapeHtml(item.icon || "📌")}</span>
-          <strong>${escapeHtml(item.name)}</strong>
-          <span class="${differenceClass}">${formatPercent(item.difference)}</span>
-        </div>
-        <div class="paired-bar-row">
-          <span>Target</span>
-          <div class="progress paired-progress" role="progressbar" aria-label="${escapeHtml(`${item.name} target allocation`)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${item.target.toFixed(1)}">
-            <span class="target-bar" style="width:${item.target.toFixed(2)}%"></span>
-          </div>
-          <strong>${item.target.toFixed(1)}%</strong>
-        </div>
-        <div class="paired-bar-row">
-          <span>Actual</span>
-          <div class="progress paired-progress" role="progressbar" aria-label="${escapeHtml(`${item.name} actual allocation`)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${item.actual.toFixed(1)}">
-            <span style="width:${item.actual.toFixed(2)}%;background:${escapeHtml(item.color)}"></span>
-          </div>
-          <strong>${item.actual.toFixed(1)}%</strong>
-        </div>
-      </div>`;
-    }).join("") : emptyState("Enter target or actual category amounts to see the comparison.")}</div>
-  </div>`;
-
-  return `<div class="allocation-comparison">
-    ${chart("target", "Target allocation")}
-    ${chart("actual", "Actual allocation")}
-    ${comparison}
-  </div>`;
+      <div class="progress allocation-progress" role="progressbar" aria-label="${escapeHtml(`${item.name} current allocation`)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${item.actual.toFixed(1)}">
+        <span style="width:${item.actual.toFixed(2)}%;background:${escapeHtml(item.color)}"></span>
+      </div>
+    </div>`).join("") : emptyState("No current holdings entered.")}</div>
+  </div></div>`;
 }
 
 function goalsMarkup(limit) {
@@ -482,16 +441,13 @@ function renderInvestments() {
       ${metric("Return", formatPercent(profitPercentage(state.data.investments)), totalProfit(state.data.investments) < 0 ? "negative" : "positive")}
     </section>
     <section class="card">
-      <div class="section-header"><h2>Target vs actual</h2><button class="text-button" data-route-link="investment-categories">View allocation</button></div>
+      <div class="section-header"><h2>Current allocation</h2><button class="text-button" data-route-link="investment-categories">View targets</button></div>
       <div class="table-wrap"><table>
-        <thead><tr><th>Category</th><th>Target amount</th><th>Target</th><th>Actual amount</th><th>Actual</th><th>Difference</th></tr></thead>
+        <thead><tr><th>Category</th><th>Current amount</th><th>Current allocation</th></tr></thead>
         <tbody>${allocations.map((item) => `<tr>
           <td>${escapeHtml(item.icon || "")} ${escapeHtml(item.name)}</td>
-          <td>${formatMoney(item.targetAmount)}</td>
-          <td>${item.target.toFixed(1)}%</td>
           <td>${formatMoney(item.value)}</td>
           <td>${item.actual.toFixed(1)}%</td>
-          <td class="${item.difference < 0 ? "negative" : "positive"}">${formatPercent(item.difference)}</td>
         </tr>`).join("")}</tbody>
       </table></div>
     </section>
@@ -594,14 +550,12 @@ function renderExpenses() {
 
 function renderAccounts() {
   const totalBalance = state.data.accounts.reduce((sum, item) => sum + Number(item.balance || 0), 0);
-  const totalTarget = state.data.accounts.reduce((sum, item) => sum + Number(item.targetBalance || 0), 0);
   const totalMinimum = state.data.accounts.reduce((sum, item) => sum + Number(item.minimumBalance || 0), 0);
   const totalMonthly = state.data.accounts.reduce((sum, item) => sum + Number(item.monthlyAllocation || 0), 0);
   main.className = "";
   main.innerHTML = `
     <section class="metric-grid">
       ${metric("Available cash", formatMoney(totalBalance), totalBalance < 0 ? "negative" : "positive")}
-      ${metric("Balance expectation", formatMoney(totalTarget))}
       ${metric("Monthly minimum", formatMoney(totalMinimum))}
       ${metric("Monthly allocation", formatMoney(totalMonthly))}
       ${metric("Accounts", String(state.data.accounts.length))}
@@ -610,7 +564,7 @@ function renderAccounts() {
       <div class="section-header"><h2>Your accounts</h2></div>
       <div class="list">${state.data.accounts.length ? state.data.accounts.map((item) => `<div class="list-item">
         ${item.bankId ? bankMark(bankById(item.bankId)) : `<span class="entity-icon" aria-hidden="true">${escapeHtml(categoryIcon(item.typeId))}</span>`}
-        <div class="list-main"><strong>${escapeHtml(item.name)}${item.import?.managed ? ` <span class="status-badge">Imported</span>` : ""}</strong><small>${escapeHtml(bankName(item.bankId) || item.purpose || categoryName(item.typeId))}</small><small>Minimum ${formatMoney(item.minimumBalance)} · Target ${formatMoney(item.targetBalance)}</small></div>
+        <div class="list-main"><strong>${escapeHtml(item.name)}${item.import?.managed ? ` <span class="status-badge">Imported</span>` : ""}</strong><small>${escapeHtml(bankName(item.bankId) || item.purpose || categoryName(item.typeId))}</small><small>Minimum ${formatMoney(item.minimumBalance)}</small></div>
         <div class="list-value"><strong class="${Number(item.balance) < 0 ? "negative" : ""}">${formatMoney(item.balance)}</strong><small>${formatMoney(item.monthlyAllocation)} / month</small></div>
       </div>`).join("") : emptyState("No accounts yet.")}</div>
     </section>
@@ -863,16 +817,10 @@ function renderNetWorth() {
 
 function categorySettings(group, title) {
   const items = state.data.categories.filter((item) => item.group === group);
-  const targetTotal = group === "investment"
-    ? items.reduce((sum, item) => sum + Number(item.targetAmount || 0), 0)
-    : 0;
-  const actualTotal = group === "investment"
-    ? items.reduce((sum, item) => sum + Number(item.actualAmount || 0), 0)
-    : 0;
   return `<section class="card">
     <div class="section-header"><h2>${escapeHtml(title)}</h2></div>
     ${items.map((item) => `<div class="category-row">
-      <span>${escapeHtml(item.icon || "")} ${escapeHtml(item.name)}${group === "investment" ? ` · Target ${formatMoney(item.targetAmount)} (${targetTotal > 0 ? ((Number(item.targetAmount || 0) / targetTotal) * 100).toFixed(1) : "0.0"}%) · Actual ${formatMoney(item.actualAmount)} (${actualTotal > 0 ? ((Number(item.actualAmount || 0) / actualTotal) * 100).toFixed(1) : "0.0"}%)` : ""}${group === "expense" ? ` · ${formatMoney(item.budget)} plan` : ""}</span>
+      <span>${escapeHtml(item.icon || "")} ${escapeHtml(item.name)}${group === "expense" ? ` · ${formatMoney(item.budget)} plan` : ""}</span>
     </div>`).join("")}
   </section>`;
 }
@@ -948,7 +896,9 @@ function renderSettings() {
 
 function initializeWorkbookDraft() {
   if (workbookDraft) return;
-  workbookDraft = Object.fromEntries(WORKBOOK_SHEETS.map((sheet) => [sheet.id, structuredClone(state.data[sheet.id] || [])]));
+  workbookDraft = Object.fromEntries(WORKBOOK_SHEETS.map((sheet) => [sheet.id, sheet.id === "targets"
+    ? state.data.categories.filter((category) => category.group === "investment").map((category) => ({ id: category.id, name: category.name, targetAmount: Number(category.targetAmount || 0) }))
+    : structuredClone(state.data[sheet.id] || [])]));
   activeWorkbookSheet = WORKBOOK_SHEETS.some((sheet) => sheet.id === activeWorkbookSheet) ? activeWorkbookSheet : "accounts";
   workbookDirty = false;
   activeWorkbookCell = null;
@@ -956,6 +906,17 @@ function initializeWorkbookDraft() {
 
 function workbookSheet() {
   return WORKBOOK_SHEETS.find((sheet) => sheet.id === activeWorkbookSheet) || WORKBOOK_SHEETS[0];
+}
+
+function synchronizeWorkbookTargets() {
+  const targetsById = new Map(workbookDraft.targets.map((target) => [target.id, target]));
+  workbookDraft.targets = workbookDraft.categories
+    .filter((category) => category.group === "investment")
+    .map((category) => ({
+      id: category.id,
+      name: category.name,
+      targetAmount: Number(targetsById.get(category.id)?.targetAmount ?? category.targetAmount ?? 0)
+    }));
 }
 
 function workbookCellValue(record, column) {
@@ -974,7 +935,7 @@ function workbookColumnOptions(column) {
 function workbookCell(record, column, rowIndex, columnIndex) {
   const value = workbookCellValue(record, column);
   const options = workbookColumnOptions(column);
-  const common = `data-workbook-cell data-key="${escapeHtml(column.key)}" data-column="${columnIndex}" aria-label="${escapeHtml(column.label)} row ${rowIndex + 1}"`;
+  const common = `data-workbook-cell data-key="${escapeHtml(column.key)}" data-column="${columnIndex}" aria-label="${escapeHtml(column.label)} row ${rowIndex + 1}" ${column.readonly ? "readonly" : ""}`;
   if (options) {
     const hasValue = options.some((option) => option.value === value);
     return `<select ${common}>${!hasValue && value ? `<option value="${escapeHtml(value)}" selected>${escapeHtml(value)} (missing)</option>` : ""}${options.map((option) => `<option value="${escapeHtml(option.value)}" ${option.value === value ? "selected" : ""}>${escapeHtml(option.label)}</option>`).join("")}</select>`;
@@ -988,7 +949,7 @@ function workbookRow(record, rowIndex) {
   return `<tr data-workbook-row data-index="${rowIndex}">
     <th class="sheet-row-number" scope="row">${rowIndex + 1}</th>
     ${sheet.columns.map((column, columnIndex) => `<td>${workbookCell(record, column, rowIndex, columnIndex)}</td>`).join("")}
-    <td><button class="mini-button danger" data-workbook-delete-row type="button" aria-label="Delete row ${rowIndex + 1}">×</button></td>
+    ${sheet.fixedRows ? "" : `<td><button class="mini-button danger" data-workbook-delete-row type="button" aria-label="Delete row ${rowIndex + 1}">×</button></td>`}
   </tr>`;
 }
 
@@ -1042,7 +1003,13 @@ function validateWorkbook() {
 async function saveWorkbook(exitAfterSave = false) {
   captureWorkbookSheet();
   validateWorkbook();
-  await replaceWorkbookData(workbookDraft);
+  const recordsByStore = structuredClone(workbookDraft);
+  for (const target of recordsByStore.targets) {
+    const category = recordsByStore.categories.find((item) => item.id === target.id);
+    if (category) category.targetAmount = Number(target.targetAmount || 0);
+  }
+  delete recordsByStore.targets;
+  await replaceWorkbookData(recordsByStore);
   workbookDirty = false;
   workbookDraft = null;
   await loadState();
@@ -1057,6 +1024,7 @@ async function saveWorkbook(exitAfterSave = false) {
 function renderSpreadsheet() {
   initializeWorkbookDraft();
   const sheet = workbookSheet();
+  if (sheet.id === "targets") synchronizeWorkbookTargets();
   const rows = workbookDraft[sheet.id];
   main.className = "workbook-main";
   main.innerHTML = `<section class="workbook-shell">
@@ -1065,31 +1033,38 @@ function renderSpreadsheet() {
       <div class="workbook-actions"><span class="status-badge">${workbookDirty ? "Unsaved changes" : "Saved"}</span><button class="button secondary" data-workbook-exit type="button">Exit</button><button class="button secondary" data-workbook-save type="button">Save</button><button class="button primary" data-workbook-save-exit type="button">Save &amp; exit</button></div>
     </header>
     <div class="workbook-toolbar">
-      <button class="button secondary" data-workbook-add-row type="button">＋ Add row</button>
-      <button class="button secondary" data-workbook-duplicate-row type="button">⧉ Duplicate</button>
+      ${sheet.fixedRows ? "" : `<button class="button secondary" data-workbook-add-row type="button">＋ Add row</button>
+      <button class="button secondary" data-workbook-duplicate-row type="button">⧉ Duplicate</button>`}
       <span class="status-badge" id="workbook-row-count">${rows.length} rows</span>
       <span class="workbook-help">Select a cell to edit, or paste a value directly.</span>
     </div>
     <div class="sheet-formula-bar workbook-formula"><strong id="workbook-cell-address">--</strong><input id="workbook-formula-input" type="text" aria-label="Selected workbook cell value" placeholder="Select a cell"></div>
-    <div class="workbook-grid-wrap"><table class="sheet-grid workbook-grid"><thead><tr><th class="sheet-corner">#</th>${sheet.columns.map((column, index) => `<th><span>${excelColumnName(index)}</span>${escapeHtml(column.label)}</th>`).join("")}<th>Delete</th></tr></thead><tbody id="workbook-grid-body">${rows.map(workbookRow).join("")}</tbody></table></div>
+    <div class="workbook-grid-wrap"><table class="sheet-grid workbook-grid"><thead><tr><th class="sheet-corner">#</th>${sheet.columns.map((column, index) => `<th><span>${excelColumnName(index)}</span>${escapeHtml(column.label)}</th>`).join("")}${sheet.fixedRows ? "" : "<th>Delete</th>"}</tr></thead><tbody id="workbook-grid-body">${rows.map(workbookRow).join("")}</tbody></table></div>
     <nav class="workbook-tabs" aria-label="Workbook sheets">${WORKBOOK_SHEETS.map((entry) => `<button type="button" data-workbook-sheet="${entry.id}" class="${entry.id === sheet.id ? "active" : ""}"><span aria-hidden="true">${entry.icon}</span>${escapeHtml(entry.label)}<small>${workbookDraft[entry.id].length}</small></button>`).join("")}</nav>
   </section>`;
 }
 
 function renderInvestmentCategories() {
+  const targets = state.data.categories.filter((item) => item.group === "investment");
   main.className = "";
   main.innerHTML = `
     <section class="card">
       <div class="section-header">
         <div>
           <p class="section-label">PORTFOLIO ALLOCATION</p>
-          <h2>Target and actual amounts</h2>
+          <h2>Allocation targets</h2>
         </div>
         <button class="text-button" data-route-link="investments">Back</button>
       </div>
-      <p class="muted">Only investment categories are shown here. Open the workbook Categories sheet to update target and actual INR amounts.</p>
+      <p class="muted">Targets are separate from current holdings. Open the workbook Targets sheet to update them.</p>
     </section>
-    ${categorySettings("investment", "Investment categories")}`;
+    <section class="card">
+      <div class="section-header"><h2>Category targets</h2></div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Category</th><th>Target</th></tr></thead>
+        <tbody>${targets.map((item) => `<tr><td>${escapeHtml(item.icon || "")} ${escapeHtml(item.name)}</td><td>${formatMoney(item.targetAmount)}</td></tr>`).join("")}</tbody>
+      </table></div>
+    </section>`;
 }
 
 const renderers = {
@@ -1259,7 +1234,6 @@ function openAccountForm(item = {}) {
     ${selectField("bankId", "Bank", bankOptions(item.bankId), true)}
     ${categoryChoiceField("typeId", "Account type", "account", item.typeId)}
     ${field("balance", "Current balance", "number", item.balance, { step: "0.01" })}
-    ${field("targetBalance", "Balance expectation", "number", item.targetBalance, { min: 0, step: "0.01" })}
     ${field("minimumBalance", "Monthly minimum required", "number", item.minimumBalance, { min: 0, step: "0.01" })}
     ${field("monthlyAllocation", "Monthly allocation", "number", item.monthlyAllocation, { min: 0, step: "0.01" })}
     ${field("purpose", "Purpose", "text", item.purpose, { full: true })}
@@ -1272,7 +1246,6 @@ function openAccountForm(item = {}) {
       bankId: formValue(formData, "bankId"),
       typeId: formValue(formData, "typeId"),
       balance: Number(formValue(formData, "balance")),
-      targetBalance: Number(formValue(formData, "targetBalance")),
       minimumBalance: Number(formValue(formData, "minimumBalance")),
       monthlyAllocation: Number(formValue(formData, "monthlyAllocation")),
       purpose: formValue(formData, "purpose"),
@@ -1439,8 +1412,6 @@ function openCategoryForm(group, item = {}) {
   openDialog(item.id ? "Edit category" : "Add category", `
     ${field("name", "Name", "text", item.name, { required: true, full: true })}
     ${field("icon", "Icon or emoji", "text", item.icon, { full: group !== "investment", placeholder: iconExamples[group] })}
-    ${group === "investment" ? field("targetAmount", "Target amount (INR)", "number", item.targetAmount, { required: true, min: 0, step: "0.01" }) : ""}
-    ${group === "investment" ? field("actualAmount", "Current actual amount (INR)", "number", item.actualAmount, { required: true, min: 0, step: "0.01" }) : ""}
     ${group === "expense" ? field("budget", "Monthly expense plan", "number", item.budget, { min: 0, step: "0.01" }) : ""}
   `, async (formData) => {
     const category = {
@@ -1449,8 +1420,6 @@ function openCategoryForm(group, item = {}) {
       group,
       name: formValue(formData, "name"),
       icon: formValue(formData, "icon"),
-      targetAmount: group === "investment" ? Number(formValue(formData, "targetAmount")) : undefined,
-      actualAmount: group === "investment" ? Number(formValue(formData, "actualAmount")) : undefined,
       budget: group === "expense" ? Number(formValue(formData, "budget")) : undefined
     };
     delete category.target;

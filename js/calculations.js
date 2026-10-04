@@ -112,8 +112,7 @@ export function assetAllocation(investments, categories) {
     const holdingValue = investments
         .filter((investment) => investment.categoryId === category.id)
         .reduce((sum, investment) => sum + number(investment.currentValue), 0);
-    const value = Object.hasOwn(category, "actualAmount") ? number(category.actualAmount) : holdingValue;
-    return { category, value };
+    return { category, value: holdingValue };
   });
   const actualTotal = categoryValues.reduce((sum, item) => sum + item.value, 0);
 

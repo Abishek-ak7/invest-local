@@ -37,7 +37,7 @@ The file is parsed entirely in the browser. Applying a valid file atomically rep
 
 The normal Home, Investments, Expenses, Accounts, and More pages are read-only views. Select the grid button in the top bar or open **More → Workbook editor** to enter the only data-editing mode.
 
-The full-screen workbook contains tabs for Accounts, Investments, Transactions, Liabilities, Goals, Plans, Plan Checks, Cards, Products, Categories, Banks, and Net Worth. Cell changes remain in one shared draft while switching tabs. Each sheet supports direct editing, native copy and paste, an active-cell value bar, typed number/date fields, reference dropdowns, row creation, duplication, and deletion.
+The full-screen workbook contains tabs for Accounts, Investments, Transactions, Liabilities, Goals, Plans, Plan Checks, Cards, Products, Targets, Categories, Banks, and Net Worth. Cell changes remain in one shared draft while switching tabs. Data sheets support direct editing, native copy and paste, an active-cell value bar, typed number/date fields, reference dropdowns, row creation, duplication, and deletion. Targets is a fixed category/target grid.
 
 **Save** validates and atomically commits every sheet while keeping the workbook open. **Save & exit** commits all sheets and returns to the read-only dashboard. **Exit** discards unsaved changes after confirmation. Invalid rows leave all existing app data unchanged.
 
@@ -67,7 +67,7 @@ Production hosting should also send the Content Security Policy from `index.html
 
 Use the workbook **Categories** sheet to add, rename, or delete investment categories, expense categories, and account types. Account records select those types from a dropdown in the **Accounts** sheet.
 
-Investment categories store both target and current actual amounts. Cash, Bonds, Foreign Stocks, and ETFs are separate categories so each allocation can be tracked independently. The app divides each target amount by the total target and each actual amount by the total actual to calculate both allocation sets dynamically. The dashboard and Investments page present the resulting allocations as read-only charts and comparisons. Chart colors are assigned automatically.
+Investment targets are edited separately in the workbook **Targets** sheet, which contains only category and target amount. Current allocation is calculated automatically from investment holdings and appears in the dashboard and Investments page; there is no manual actual-amount field. Cash, Bonds, Foreign Stocks, and ETFs remain separate categories. Chart colors are assigned automatically.
 
 ## Monthly checklist and streaks
 

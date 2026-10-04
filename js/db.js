@@ -22,7 +22,7 @@ export const STORES = [
 
 const defaultCategories = [
   { id: "inv-foreign", group: "investment", name: "Foreign Stocks", icon: "🌎", target: 36.6972477064, color: "#176b5b" },
-  { id: "inv-etfs", group: "investment", name: "ETFs", icon: "🧺", targetAmount: 0, actualAmount: 0 },
+  { id: "inv-etfs", group: "investment", name: "ETFs", icon: "🧺", targetAmount: 0 },
   { id: "inv-funds", group: "investment", name: "Indian Equity Funds", icon: "📊", target: 18.3486238532, color: "#2f80ed" },
   { id: "inv-stocks", group: "investment", name: "Indian Stocks", icon: "🇮🇳", target: 13.7614678899, color: "#7b61ff" },
   { id: "inv-gold", group: "investment", name: "Gold / Metals", icon: "🪙", target: 9.1743119266, color: "#e0a100" },

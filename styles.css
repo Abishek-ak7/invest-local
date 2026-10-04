@@ -1352,6 +1352,10 @@ dialog::backdrop {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .allocation-current-only {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .allocation-variance {
     grid-column: 1 / -1;
   }

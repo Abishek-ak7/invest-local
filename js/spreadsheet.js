@@ -208,7 +208,6 @@ export async function parseSpreadsheet(text, categories, sourceName = "spreadshe
         bankId: resolveBank(banks, institution),
         typeId: resolveCategory(categories, "account", typeName, "account-5", line),
         balance: numberValue(row, headerMap.balance, line),
-        targetBalance: 0,
         minimumBalance: 0,
         monthlyAllocation: 0,
         purpose: institution || "Spreadsheet import",
