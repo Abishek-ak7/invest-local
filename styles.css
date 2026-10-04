@@ -58,6 +58,10 @@ body {
   color: var(--text);
 }
 
+body.app-private .app-shell {
+  visibility: hidden;
+}
+
 button,
 input,
 select,
@@ -152,6 +156,138 @@ main {
   display: grid;
   gap: 1rem;
   padding: 0.5rem 0 1.5rem;
+}
+
+body:not(.workbook-mode) [data-add],
+body:not(.workbook-mode) [data-edit],
+body:not(.workbook-mode) [data-delete],
+body:not(.workbook-mode) [data-add-category],
+body:not(.workbook-mode) [data-edit-category],
+body:not(.workbook-mode) [data-delete-category],
+body:not(.workbook-mode) [data-add-bank],
+body:not(.workbook-mode) [data-edit-bank],
+body:not(.workbook-mode) [data-delete-bank],
+body:not(.workbook-mode) [data-toggle-plan],
+body:not(.workbook-mode) [data-action="snapshot"] {
+  display: none !important;
+}
+
+body.workbook-mode {
+  overflow: hidden;
+}
+
+body.workbook-mode .app-shell {
+  width: 100%;
+  height: 100vh;
+  min-height: 0;
+  padding: 0;
+}
+
+body.workbook-mode .topbar,
+body.workbook-mode .bottom-nav {
+  display: none;
+}
+
+body.workbook-mode main {
+  height: 100vh;
+  padding: 0;
+}
+
+.workbook-main {
+  min-width: 0;
+}
+
+.workbook-shell {
+  display: grid;
+  min-width: 0;
+  height: 100vh;
+  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+  background: var(--background);
+}
+
+.workbook-header,
+.workbook-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.65rem 0.85rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.workbook-header {
+  justify-content: space-between;
+  padding-top: max(0.65rem, env(safe-area-inset-top));
+}
+
+.workbook-header h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.workbook-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.workbook-help {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.workbook-formula {
+  margin: 0.45rem 0.85rem;
+}
+
+.workbook-grid-wrap {
+  min-width: 0;
+  overflow: auto;
+  margin: 0 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.workbook-tabs {
+  display: flex;
+  min-width: 0;
+  overflow-x: auto;
+  gap: 0.2rem;
+  padding: 0.45rem max(0.65rem, env(safe-area-inset-right)) calc(0.45rem + env(safe-area-inset-bottom)) max(0.65rem, env(safe-area-inset-left));
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.workbook-tabs button {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.workbook-tabs button.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.workbook-tabs small {
+  display: grid;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--surface-2);
+  font-size: 0.62rem;
 }
 
 .grid,
@@ -288,6 +424,61 @@ main {
   border-radius: 12px;
   background: var(--surface-2);
   font-size: 1.35rem;
+}
+
+.bank-mark {
+  display: grid;
+  width: 3rem;
+  height: 2.5rem;
+  flex: 0 0 3rem;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--bank-color, var(--accent)) 70%, white);
+  border-radius: 8px;
+  background: var(--bank-color, var(--accent));
+  color: white;
+  font-size: 0.65rem;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: 0;
+}
+
+.bank-mark-small {
+  width: 2.5rem;
+  height: 2rem;
+  flex-basis: 2.5rem;
+  font-size: 0.58rem;
+}
+
+.bank-directory {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.6rem;
+  margin-top: 1rem;
+}
+
+.bank-directory-item {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+
+.bank-directory-item strong,
+.bank-directory-item small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bank-directory-item small {
+  margin-top: 0.15rem;
+  color: var(--muted);
 }
 
 .more-menu-icon {
@@ -783,6 +974,155 @@ label > span {
   overflow-x: auto;
 }
 
+dialog.spreadsheet-dialog {
+  width: min(calc(100% - 1rem), 1500px);
+  max-height: 94vh;
+}
+
+.spreadsheet-dialog #dialog-body {
+  padding: 0.75rem;
+}
+
+.spreadsheet-dialog #dialog-body > .form-grid {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 1fr;
+  gap: 0.65rem;
+}
+
+.sheet-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.sheet-help {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.sheet-formula-bar {
+  display: grid;
+  grid-template-columns: 4rem minmax(0, 1fr);
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+}
+
+.sheet-formula-bar strong {
+  padding: 0 0.65rem;
+  text-align: center;
+}
+
+.sheet-formula-bar input {
+  min-width: 0;
+  border: 0;
+  border-left: 1px solid var(--border);
+  border-radius: 0;
+  background: var(--surface);
+}
+
+.sheet-grid-wrap {
+  overflow: auto;
+  max-height: min(62vh, 680px);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.sheet-grid {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  table-layout: fixed;
+  font-size: 0.76rem;
+}
+
+.sheet-grid th,
+.sheet-grid td {
+  min-width: 9rem;
+  padding: 0;
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  text-align: left;
+}
+
+.sheet-grid thead th {
+  position: sticky;
+  z-index: 3;
+  top: 0;
+  height: 3rem;
+  padding: 0.3rem 0.45rem;
+  background: var(--surface-2);
+  color: var(--text);
+  font-weight: 700;
+  white-space: normal;
+}
+
+.sheet-grid thead th span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.62rem;
+  font-weight: 600;
+}
+
+.sheet-grid .sheet-corner,
+.sheet-grid .sheet-row-number {
+  position: sticky;
+  z-index: 2;
+  left: 0;
+  min-width: 3rem;
+  width: 3rem;
+  background: var(--surface-2);
+  text-align: center;
+}
+
+.sheet-grid .sheet-corner {
+  z-index: 4;
+}
+
+.sheet-grid input,
+.sheet-grid select {
+  width: 100%;
+  min-width: 9rem;
+  height: 2.4rem;
+  padding: 0.35rem 0.45rem;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 0.76rem;
+}
+
+.sheet-grid input:focus,
+.sheet-grid select:focus,
+.sheet-grid .sheet-cell-active {
+  position: relative;
+  z-index: 1;
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  background: var(--accent-soft);
+}
+
+.sheet-grid .sheet-row-focus td {
+  background: color-mix(in srgb, var(--accent-soft) 45%, var(--surface));
+}
+
+.sheet-grid td:last-child,
+.sheet-grid th:last-child {
+  min-width: 4rem;
+  text-align: center;
+}
+
+.sheet-grid td:last-child .mini-button {
+  margin: 0.2rem auto;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
@@ -969,6 +1309,10 @@ dialog::backdrop {
 }
 
 @media (min-width: 700px) {
+  .bank-directory {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .app-shell {
     padding-right: 1.5rem;
     padding-bottom: 2rem;
@@ -1026,6 +1370,43 @@ dialog::backdrop {
 
   .toast {
     bottom: 1rem;
+  }
+}
+
+@media (max-width: 699px) {
+  .workbook-header,
+  .workbook-toolbar {
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+
+  .workbook-header > div:first-child {
+    flex: 1 0 100%;
+  }
+
+  .workbook-actions {
+    width: 100%;
+  }
+
+  .workbook-actions .status-badge {
+    margin-right: auto;
+  }
+
+  .workbook-actions .button,
+  .workbook-toolbar .button {
+    padding: 0.6rem;
+    font-size: 0.76rem;
+  }
+
+  .workbook-help {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .workbook-formula,
+  .workbook-grid-wrap {
+    margin-right: 0.45rem;
+    margin-left: 0.45rem;
   }
 }
 

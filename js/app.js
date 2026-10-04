@@ -8,6 +8,8 @@ import {
   importAllData,
   initializeDatabase,
   putOne,
+  replaceImportedData,
+  replaceWorkbookData,
   resetToDefaults
 } from "./db.js";
 import {
@@ -25,6 +27,7 @@ import {
   totalInvested,
   totalProfit
 } from "./calculations.js";
+import { parseSpreadsheet, spreadsheetTemplate } from "./spreadsheet.js";
 
 const main = document.querySelector("#main-content");
 const pageTitle = document.querySelector("#page-title");
@@ -35,6 +38,7 @@ const dialogBody = document.querySelector("#dialog-body");
 const dialogSave = document.querySelector("#dialog-save");
 const toastElement = document.querySelector("#toast");
 const backupInput = document.querySelector("#backup-file-input");
+const spreadsheetInput = document.querySelector("#spreadsheet-file-input");
 const themeToggleButton = document.querySelector("#theme-toggle-button");
 
 const storeNames = STORES.filter((name) => name !== "settings");
@@ -56,6 +60,10 @@ const state = {
 
 let dialogSubmitHandler = null;
 let toastTimer;
+let workbookDraft = null;
+let activeWorkbookSheet = "accounts";
+let activeWorkbookCell = null;
+let workbookDirty = false;
 
 const routeTitles = {
   home: "Home",
@@ -70,8 +78,64 @@ const routeTitles = {
   cards: "Cards",
   strategy: "Investment Plan",
   networth: "Net Worth & Liabilities",
+  spreadsheet: "Workbook Editor",
   settings: "Settings"
 };
+
+const workbookSelects = {
+  bank: () => [{ value: "", label: "None" }, ...(workbookDraft?.banks || state.data.banks).map((item) => ({ value: item.id, label: `${item.shortName} · ${item.name}` }))],
+  account: () => [{ value: "", label: "None" }, ...(workbookDraft?.accounts || state.data.accounts).map((item) => ({ value: item.id, label: item.name }))],
+  accountCategory: () => (workbookDraft?.categories || state.data.categories).filter((item) => item.group === "account").map((item) => ({ value: item.id, label: item.name })),
+  investmentCategory: () => (workbookDraft?.categories || state.data.categories).filter((item) => item.group === "investment").map((item) => ({ value: item.id, label: item.name })),
+  anyCategory: () => [{ value: "", label: "None" }, ...(workbookDraft?.categories || state.data.categories).map((item) => ({ value: item.id, label: `${item.group} · ${item.name}` }))],
+  plan: () => [{ value: "", label: "None" }, ...(workbookDraft?.monthlyPlans || state.data.monthlyPlans).map((item) => ({ value: item.id, label: item.name }))]
+};
+
+const WORKBOOK_SHEETS = [
+  { id: "accounts", label: "Accounts", icon: "🏦", prefix: "account", columns: [
+    { key: "id", label: "ID", required: true }, { key: "name", label: "Name", required: true }, { key: "bankId", label: "Bank", options: workbookSelects.bank }, { key: "typeId", label: "Account type", options: workbookSelects.accountCategory, required: true },
+    { key: "balance", label: "Balance", type: "number" }, { key: "targetBalance", label: "Target", type: "number" }, { key: "minimumBalance", label: "Minimum", type: "number" }, { key: "monthlyAllocation", label: "Monthly allocation", type: "number" },
+    { key: "purpose", label: "Purpose" }, { key: "notes", label: "Notes" }, { key: "currency", label: "Currency", values: ["INR", "USD", "EUR", "GBP", "AED", "SGD"], default: "INR" }
+  ] },
+  { id: "investments", label: "Investments", icon: "📈", prefix: "investment", columns: [
+    { key: "id", label: "ID", required: true }, { key: "name", label: "Name", required: true }, { key: "categoryId", label: "Category", options: workbookSelects.investmentCategory, required: true }, { key: "accountId", label: "Account", options: workbookSelects.account },
+    { key: "quantity", label: "Quantity", type: "number" }, { key: "buyPrice", label: "Buy price", type: "number" }, { key: "investedAmount", label: "Invested", type: "number" }, { key: "currentPrice", label: "Current price", type: "number" }, { key: "currentValue", label: "Current value", type: "number" },
+    { key: "purchaseDate", label: "Purchase date", type: "date" }, { key: "notes", label: "Notes" }, { key: "currency", label: "Currency", values: ["INR", "USD", "EUR", "GBP", "AED", "SGD"], default: "INR" }
+  ] },
+  { id: "transactions", label: "Transactions", icon: "↕", prefix: "transaction", columns: [
+    { key: "id", label: "ID", required: true }, { key: "type", label: "Type", values: ["Investment", "Withdrawal", "Dividend", "Interest", "Expense", "Income", "Transfer"], required: true }, { key: "date", label: "Date", type: "date", required: true }, { key: "amount", label: "Amount", type: "number", required: true },
+    { key: "categoryId", label: "Category", options: workbookSelects.anyCategory }, { key: "accountId", label: "Account", options: workbookSelects.account }, { key: "description", label: "Description" }, { key: "notes", label: "Notes" }, { key: "currency", label: "Currency", values: ["INR", "USD", "EUR", "GBP", "AED", "SGD"], default: "INR" }
+  ] },
+  { id: "liabilities", label: "Liabilities", icon: "⚖", prefix: "liability", columns: [
+    { key: "id", label: "ID", required: true }, { key: "name", label: "Name", required: true }, { key: "type", label: "Type", values: ["Personal loan", "Home loan", "Education loan", "Vehicle loan", "Credit card", "Buy now, pay later", "Other"] }, { key: "lender", label: "Lender" },
+    { key: "principalAmount", label: "Principal", type: "number", required: true }, { key: "paidAmount", label: "Paid", type: "number" }, { key: "interestMethod", label: "Interest method", values: ["Reducing", "Fixed"], default: "Reducing" }, { key: "interestRate", label: "Rate %", type: "number" }, { key: "durationMonths", label: "Months", type: "number" },
+    { key: "monthlyPayment", label: "Monthly payment", type: "number" }, { key: "totalAmount", label: "Total", type: "number" }, { key: "amount", label: "Remaining", type: "number" }, { key: "startDate", label: "Start", type: "date" }, { key: "endDate", label: "End", type: "date" }, { key: "notes", label: "Notes" }, { key: "currency", label: "Currency", values: ["INR", "USD", "EUR", "GBP", "AED", "SGD"], default: "INR" }
+  ] },
+  { id: "goals", label: "Goals", icon: "◎", prefix: "goal", columns: [
+    { key: "id", label: "ID", required: true }, { key: "name", label: "Goal", required: true }, { key: "target", label: "Target", type: "number" }, { key: "current", label: "Current", type: "number" }, { key: "status", label: "Status", values: ["Planned", "Ongoing", "Paused", "Completed"], default: "Planned" }, { key: "targetDate", label: "Target date" }
+  ] },
+  { id: "monthlyPlans", label: "Plans", icon: "☑", prefix: "plan", columns: [
+    { key: "id", label: "ID", required: true }, { key: "name", label: "Plan item", required: true }, { key: "categoryId", label: "Category", options: workbookSelects.investmentCategory }, { key: "amount", label: "Monthly amount", type: "number" }, { key: "purpose", label: "Purpose" }
+  ] },
+  { id: "planCompletions", label: "Plan Checks", icon: "✓", prefix: "completion", columns: [
+    { key: "id", label: "ID", required: true }, { key: "planId", label: "Plan", options: workbookSelects.plan, required: true }, { key: "month", label: "Month", type: "month", required: true }, { key: "completedAt", label: "Completed at", type: "datetime-local" }
+  ] },
+  { id: "cards", label: "Cards", icon: "▣", prefix: "card", columns: [
+    { key: "id", label: "ID", required: true }, { key: "name", label: "Card", required: true }, { key: "icon", label: "Icon" }, { key: "status", label: "Status", values: ["Current", "Future"], default: "Current" }, { key: "bankId", label: "Bank", options: workbookSelects.bank }, { key: "purpose", label: "Purpose" }, { key: "notes", label: "Notes" }
+  ] },
+  { id: "investmentProducts", label: "Products", icon: "◇", prefix: "product", columns: [
+    { key: "id", label: "ID", required: true }, { key: "name", label: "Product", required: true }, { key: "ticker", label: "Ticker" }, { key: "categoryId", label: "Category", options: workbookSelects.investmentCategory }, { key: "monthlyAmount", label: "Monthly amount", type: "number" }, { key: "charges", label: "Charges %", type: "number" }, { key: "status", label: "Status", values: ["Planned", "Active", "Paused", "Completed"], default: "Planned" }, { key: "exposure", label: "Exposure" }, { key: "notes", label: "Notes" }
+  ] },
+  { id: "categories", label: "Categories", icon: "▤", prefix: "category", columns: [
+    { key: "id", label: "ID", required: true }, { key: "group", label: "Group", values: ["investment", "expense", "account"], required: true }, { key: "name", label: "Name", required: true }, { key: "icon", label: "Icon" }, { key: "targetAmount", label: "Target amount", type: "number" }, { key: "actualAmount", label: "Actual amount", type: "number" }, { key: "budget", label: "Monthly budget", type: "number" }
+  ] },
+  { id: "banks", label: "Banks", icon: "🏛", prefix: "bank", columns: [
+    { key: "id", label: "ID", required: true }, { key: "name", label: "Bank name", required: true }, { key: "shortName", label: "Logo text", required: true }, { key: "color", label: "Logo color", type: "color", default: "#176b5b" }, { key: "aliases", label: "Aliases", array: true }
+  ] },
+  { id: "netWorthHistory", label: "Net Worth", icon: "⌁", prefix: "snapshot", columns: [
+    { key: "id", label: "ID", required: true }, { key: "date", label: "Date", type: "date", required: true }, { key: "value", label: "Value", type: "number", required: true }
+  ] }
+];
 
 function localDateKey(date = new Date()) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
@@ -144,6 +208,28 @@ function categoryIcon(id, fallback = "🗂️") {
 
 function accountName(id) {
   return state.data.accounts.find((item) => item.id === id)?.name || "No account";
+}
+
+function bankById(id) {
+  return state.data.banks.find((item) => item.id === id);
+}
+
+function bankName(id) {
+  return bankById(id)?.name || "";
+}
+
+function bankMark(bank, className = "") {
+  if (!bank) return `<span class="bank-mark ${className}" aria-hidden="true">BANK</span>`;
+  const color = /^#[0-9a-f]{6}$/i.test(bank.color || "") ? bank.color : "#176b5b";
+  return `<span class="bank-mark ${className}" style="--bank-color:${color}" aria-hidden="true">${escapeHtml(bank.shortName || bank.name.slice(0, 4).toUpperCase())}</span>`;
+}
+
+function bankOptions(selected = "") {
+  return `<option value="">Other / not selected</option>${state.data.banks
+    .slice()
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((bank) => `<option value="${escapeHtml(bank.id)}" ${bank.id === selected ? "selected" : ""}>${escapeHtml(bank.shortName)} · ${escapeHtml(bank.name)}</option>`)
+    .join("")}`;
 }
 
 function categoryOptions(group, selected = "") {
@@ -319,7 +405,7 @@ function allocationMarkup() {
 
 function goalsMarkup(limit) {
   const goals = state.data.goals.slice(0, limit);
-  if (!goals.length) return emptyState("No goals yet. Add one from More → Goals.");
+  if (!goals.length) return emptyState("No goals yet. Add one in the workbook Goals sheet.");
   return `<div class="list">${goals.map((goal) => {
     const progress = goalProgress(goal);
     return `<div class="list-item">
@@ -373,7 +459,7 @@ function renderHome() {
       ${transactionList(state.data.transactions, 6)}
     </section>` : ""}
     ${cardVisible("goals") ? `<section class="card span-5">
-      <div class="section-header"><h2>Goals</h2><button class="text-button" data-route-link="goals">Manage</button></div>
+      <div class="section-header"><h2>Goals</h2><button class="text-button" data-route-link="goals">View all</button></div>
       ${goalsMarkup(3)}
     </section>` : ""}
   `;
@@ -396,7 +482,7 @@ function renderInvestments() {
       ${metric("Return", formatPercent(profitPercentage(state.data.investments)), totalProfit(state.data.investments) < 0 ? "negative" : "positive")}
     </section>
     <section class="card">
-      <div class="section-header"><h2>Target vs actual</h2><button class="text-button" data-route-link="investment-categories">Edit targets</button></div>
+      <div class="section-header"><h2>Target vs actual</h2><button class="text-button" data-route-link="investment-categories">View allocation</button></div>
       <div class="table-wrap"><table>
         <thead><tr><th>Category</th><th>Target amount</th><th>Target</th><th>Actual amount</th><th>Actual</th><th>Difference</th></tr></thead>
         <tbody>${allocations.map((item) => `<tr>
@@ -410,7 +496,7 @@ function renderInvestments() {
       </table></div>
     </section>
     <section class="card">
-      <div class="section-header"><h2>Holdings</h2><button class="button primary" data-add="investment">Add investment</button></div>
+      <div class="section-header"><h2>Holdings</h2></div>
       <div class="filter-row">
         <input type="search" id="investment-search" placeholder="Search investments" value="${escapeHtml(state.filters.investment)}">
         <select id="investment-category-filter" aria-label="Investment category filter">
@@ -421,16 +507,12 @@ function renderInvestments() {
         const values = investmentValues(item);
         return `<div class="list-item">
           <div class="list-main">
-            <strong>${escapeHtml(item.name)}</strong>
+            <strong>${escapeHtml(item.name)}${item.import?.managed ? ` <span class="status-badge">Imported</span>` : ""}</strong>
             <small>${escapeHtml(categoryName(item.categoryId))} · ${escapeHtml(accountName(item.accountId))} · ${formatDate(item.purchaseDate)}</small>
           </div>
           <div class="list-value">
             <strong>${formatMoney(values.currentValue)}</strong>
             <small class="${values.profit < 0 ? "negative" : "positive"}">${signedMoney(values.profit)} · ${formatPercent(values.percentage)}</small>
-          </div>
-          <div class="list-actions">
-            <button class="mini-button" data-edit="investment" data-id="${item.id}" aria-label="Edit ${escapeHtml(item.name)}">✎</button>
-            <button class="mini-button danger" data-delete="investment" data-id="${item.id}" aria-label="Delete ${escapeHtml(item.name)}">×</button>
           </div>
         </div>`;
       }).join("") : emptyState("No investments found.")}</div>
@@ -494,7 +576,7 @@ function renderExpenses() {
       </section>
     </div>
     <section class="card">
-      <div class="section-header"><h2>Expenses</h2><button class="button primary" data-add="expense">Add expense</button></div>
+      <div class="section-header"><h2>Expenses</h2></div>
       <div class="filter-row">
         <input type="search" id="expense-search" placeholder="Search expenses" value="${escapeHtml(state.filters.expense)}">
         <select id="expense-category-filter" aria-label="Expense category filter">
@@ -503,12 +585,8 @@ function renderExpenses() {
         <input type="month" id="expense-month" value="${escapeHtml(month)}" aria-label="Expense month">
       </div>
       <div class="list">${items.length ? items.map((item) => `<div class="list-item">
-        <div class="list-main"><strong>${escapeHtml(item.description || categoryName(item.categoryId))}</strong><small>${escapeHtml(categoryName(item.categoryId))} · ${formatDate(item.date)}</small></div>
+        <div class="list-main"><strong>${escapeHtml(item.description || categoryName(item.categoryId))}${item.import?.managed ? ` <span class="status-badge">Imported</span>` : ""}</strong><small>${escapeHtml(categoryName(item.categoryId))} · ${formatDate(item.date)}</small></div>
         <strong class="negative">${formatMoney(item.amount)}</strong>
-        <div class="list-actions">
-          <button class="mini-button" data-edit="expense" data-id="${item.id}" aria-label="Edit expense">✎</button>
-          <button class="mini-button danger" data-delete="transaction" data-id="${item.id}" aria-label="Delete expense">×</button>
-        </div>
       </div>`).join("") : emptyState("No expenses found.")}</div>
     </section>
   `;
@@ -529,15 +607,11 @@ function renderAccounts() {
       ${metric("Accounts", String(state.data.accounts.length))}
     </section>
     <section class="card">
-      <div class="section-header"><h2>Your accounts</h2><button class="button primary" data-add="account">Add account</button></div>
+      <div class="section-header"><h2>Your accounts</h2></div>
       <div class="list">${state.data.accounts.length ? state.data.accounts.map((item) => `<div class="list-item">
-        <span class="entity-icon" aria-hidden="true">${escapeHtml(categoryIcon(item.typeId))}</span>
-        <div class="list-main"><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.purpose || categoryName(item.typeId))}</small><small>Minimum ${formatMoney(item.minimumBalance)} · Target ${formatMoney(item.targetBalance)}</small></div>
+        ${item.bankId ? bankMark(bankById(item.bankId)) : `<span class="entity-icon" aria-hidden="true">${escapeHtml(categoryIcon(item.typeId))}</span>`}
+        <div class="list-main"><strong>${escapeHtml(item.name)}${item.import?.managed ? ` <span class="status-badge">Imported</span>` : ""}</strong><small>${escapeHtml(bankName(item.bankId) || item.purpose || categoryName(item.typeId))}</small><small>Minimum ${formatMoney(item.minimumBalance)} · Target ${formatMoney(item.targetBalance)}</small></div>
         <div class="list-value"><strong class="${Number(item.balance) < 0 ? "negative" : ""}">${formatMoney(item.balance)}</strong><small>${formatMoney(item.monthlyAllocation)} / month</small></div>
-        <div class="list-actions">
-          <button class="mini-button" data-edit="account" data-id="${item.id}" aria-label="Edit ${escapeHtml(item.name)}">✎</button>
-          <button class="mini-button danger" data-delete="account" data-id="${item.id}" aria-label="Delete ${escapeHtml(item.name)}">×</button>
-        </div>
       </div>`).join("") : emptyState("No accounts yet.")}</div>
     </section>
   `;
@@ -545,12 +619,13 @@ function renderAccounts() {
 
 function renderMore() {
   const links = [
-    ["transactions", "💸", "Transactions", "Search and manage all money movements"],
-    ["plans", "📅", "Monthly plan", "Complete monthly items and build streaks"],
-    ["strategy", "📈", "Investment plan", "Manage products, charges, tickers, and exposure"],
+    ["transactions", "💸", "Transactions", "Search all money movements"],
+    ["plans", "📅", "Monthly plan", "View monthly items and completion streaks"],
+    ["strategy", "📈", "Investment plan", "View products, charges, tickers, and exposure"],
     ["goals", "🎯", "Financial goals", "Monitor progress toward your goals"],
     ["cards", "💳", "Cards", "Track current and future credit cards"],
     ["networth", "⚖️", "Net worth & liabilities", "Track debt, interest, payments, and history"],
+    ["spreadsheet", "▦", "Workbook editor", "Edit all app data across workbook sheets"],
     ["settings", "⚙", "Settings", "Customize appearance, categories, and data"]
   ];
   main.className = "";
@@ -559,7 +634,7 @@ function renderMore() {
     <span class="list-main" style="text-align:left"><strong>${title}</strong><small>${description}</small></span>
     <span>›</span>
   </button>`).join("")}</div></section>
-  <section class="card"><p class="section-label">PRIVACY</p><h2>Your data stays here</h2><p class="muted">My Wealth has no server, analytics, tracking, or account. Everything is stored in this browser's IndexedDB. Export backups regularly, because phones remain capable of creative betrayal.</p></section>`;
+  <section class="card"><p class="section-label">PRIVACY</p><h2>Local financial records</h2><p class="muted">Financial records and spreadsheet imports stay in this browser. Nothing is uploaded to a server.</p></section>`;
 }
 
 function renderTransactions() {
@@ -573,7 +648,7 @@ function renderTransactions() {
     .sort((a, b) => b.date.localeCompare(a.date));
   main.className = "";
   main.innerHTML = `<section class="card">
-    <div class="section-header"><h2>All transactions</h2><button class="button primary" data-add="transaction">Add transaction</button></div>
+    <div class="section-header"><h2>All transactions</h2></div>
     <div class="filter-row">
       <input type="search" id="transaction-search" placeholder="Search transactions" value="${escapeHtml(state.filters.transaction)}">
       <select id="transaction-type-filter" aria-label="Transaction type filter">
@@ -581,12 +656,8 @@ function renderTransactions() {
       </select>
     </div>
     <div class="list">${items.length ? items.map((item) => `<div class="list-item">
-      <div class="list-main"><strong>${escapeHtml(item.description || item.type)}</strong><small>${escapeHtml(item.type)} · ${formatDate(item.date)} · ${escapeHtml(categoryName(item.categoryId))}</small></div>
+      <div class="list-main"><strong>${escapeHtml(item.description || item.type)}${item.import?.managed ? ` <span class="status-badge">Imported</span>` : ""}</strong><small>${escapeHtml(item.type)} · ${formatDate(item.date)} · ${escapeHtml(categoryName(item.categoryId))}</small></div>
       <strong>${formatMoney(item.amount)}</strong>
-      <div class="list-actions">
-        <button class="mini-button" data-edit="transaction" data-id="${item.id}" aria-label="Edit transaction">✎</button>
-        <button class="mini-button danger" data-delete="transaction" data-id="${item.id}" aria-label="Delete transaction">×</button>
-      </div>
     </div>`).join("") : emptyState("No transactions found.")}</div>
   </section>`;
 }
@@ -602,7 +673,7 @@ function renderGoals() {
     ${metric("Goals", String(state.data.goals.length))}
   </section>
   <section class="card">
-    <div class="section-header"><h2>Financial goals</h2><button class="button primary" data-add="goal">Add goal</button></div>
+    <div class="section-header"><h2>Financial goals</h2></div>
     <div class="list">${state.data.goals.length ? state.data.goals.map((goal) => {
       const progress = goalProgress(goal);
       return `<div class="list-item">
@@ -610,10 +681,6 @@ function renderGoals() {
           <strong>${escapeHtml(goal.name)} <span class="status-badge">${escapeHtml(goal.status || "Planned")}</span></strong>
           <div class="progress"><span style="width:${progress.percentage}%"></span></div>
           <small>${formatMoney(goal.current)} of ${formatMoney(goal.target)} · ${progress.percentage.toFixed(1)}% · ${formatMoney(progress.remaining)} remaining${goal.targetDate ? ` · by ${escapeHtml(goal.targetDate)}` : ""}</small>
-        </div>
-        <div class="list-actions">
-          <button class="mini-button" data-edit="goal" data-id="${goal.id}" aria-label="Edit ${escapeHtml(goal.name)}">✎</button>
-          <button class="mini-button danger" data-delete="goal" data-id="${goal.id}" aria-label="Delete ${escapeHtml(goal.name)}">×</button>
         </div>
       </div>`;
     }).join("") : emptyState("No goals yet.")}</div>
@@ -658,18 +725,14 @@ function renderPlans() {
     </div>
   </section>
   <section class="card">
-    <div class="section-header"><h2>Plan items</h2><button class="button primary" data-add="plan">Add item</button></div>
+    <div class="section-header"><h2>Plan items</h2></div>
     <div class="list">${state.data.monthlyPlans.length ? state.data.monthlyPlans.map((plan) => {
       const done = Boolean(planCompletion(plan.id, month));
       const streak = planStreak(plan.id, month);
       return `<div class="list-item ${done ? "completed-item" : ""}">
-      <button class="completion-button ${done ? "complete" : ""}" data-toggle-plan="${plan.id}" data-month="${month}" aria-label="${done ? "Mark pending" : "Mark completed"}">${done ? "✓" : ""}</button>
+      <span class="completion-button ${done ? "complete" : ""}" aria-label="${done ? "Completed" : "Pending"}">${done ? "✓" : ""}</span>
       <div class="list-main"><strong>${escapeHtml(plan.name)}</strong><small>${escapeHtml(plan.purpose || categoryName(plan.categoryId))}</small><small>${streak ? `🔥 ${streak} month streak` : "No active streak"}</small></div>
       <div class="list-value"><strong>${formatMoney(plan.amount)}</strong><small>${done ? "Completed" : "Pending"}</small></div>
-      <div class="list-actions">
-        <button class="mini-button" data-edit="plan" data-id="${plan.id}" aria-label="Edit ${escapeHtml(plan.name)}">✎</button>
-        <button class="mini-button danger" data-delete="plan" data-id="${plan.id}" aria-label="Delete ${escapeHtml(plan.name)}">×</button>
-      </div>
     </div>`;
     }).join("") : emptyState("No monthly plan items yet.")}</div>
   </section>`;
@@ -695,14 +758,11 @@ function renderCards() {
     ${metric("Future cards", String(state.data.cards.length - current))}
   </section>
   <section class="card">
-    <div class="section-header"><h2>Card plan</h2><button class="button primary" data-add="card">Add card</button></div>
+    <div class="section-header"><h2>Card plan</h2></div>
     <div class="list">${state.data.cards.length ? state.data.cards.map((card) => `<div class="list-item">
       <span class="entity-icon" aria-hidden="true">${escapeHtml(cardIcon(card))}</span>
-      <div class="list-main"><strong>${escapeHtml(card.name)} <span class="status-badge">${escapeHtml(card.status)}</span></strong><small>${escapeHtml(card.purpose || "No purpose set")}${card.bank ? ` · ${escapeHtml(card.bank)}` : ""}</small></div>
-      <div class="list-actions">
-        <button class="mini-button" data-edit="card" data-id="${card.id}" aria-label="Edit ${escapeHtml(card.name)}">✎</button>
-        <button class="mini-button danger" data-delete="card" data-id="${card.id}" aria-label="Delete ${escapeHtml(card.name)}">×</button>
-      </div>
+      ${card.bankId ? bankMark(bankById(card.bankId), "bank-mark-small") : ""}
+      <div class="list-main"><strong>${escapeHtml(card.name)} <span class="status-badge">${escapeHtml(card.status)}</span></strong><small>${escapeHtml(card.purpose || "No purpose set")}${bankName(card.bankId) || card.bank ? ` · ${escapeHtml(bankName(card.bankId) || card.bank)}` : ""}</small></div>
     </div>`).join("") : emptyState("No cards yet.")}</div>
   </section>`;
 }
@@ -717,16 +777,15 @@ function renderStrategy() {
     ${metric("Products", String(state.data.investmentProducts.length))}
   </section>
   <section class="card">
-    <div class="section-header"><h2>Products &amp; allocation</h2><button class="button primary" data-add="product">Add product</button></div>
+    <div class="section-header"><h2>Products &amp; allocation</h2></div>
     <div class="table-wrap"><table>
-      <thead><tr><th>Product</th><th>Category</th><th>Monthly</th><th>Charges</th><th>Status</th><th></th></tr></thead>
+      <thead><tr><th>Product</th><th>Category</th><th>Monthly</th><th>Charges</th><th>Status</th></tr></thead>
       <tbody>${state.data.investmentProducts.map((item) => `<tr>
         <td><strong>${escapeHtml(item.name)}</strong><br><small>${escapeHtml(item.ticker || item.exposure || "")}</small></td>
         <td>${escapeHtml(categoryName(item.categoryId))}</td>
         <td>${formatMoney(item.monthlyAmount)}</td>
         <td>${Number(item.charges || 0).toFixed(2)}%</td>
         <td><span class="status-badge">${escapeHtml(item.status || "Planned")}</span></td>
-        <td><div class="list-actions"><button class="mini-button" data-edit="product" data-id="${item.id}" aria-label="Edit ${escapeHtml(item.name)}">✎</button><button class="mini-button danger" data-delete="product" data-id="${item.id}" aria-label="Delete ${escapeHtml(item.name)}">×</button></div></td>
       </tr>`).join("")}</tbody>
     </table></div>
   </section>`;
@@ -767,9 +826,9 @@ function renderNetWorth() {
     <p class="eyebrow">CURRENT NET WORTH</p><p class="hero-value">${formatMoney(worth)}</p>
     <div class="hero-stats"><div><span class="muted">Accounts</span><strong>${formatMoney(accountValue)}</strong></div><div><span class="muted">Investments</span><strong>${formatMoney(totalCurrentValue(state.data.investments))}</strong></div></div>
   </section>
-  <section class="card"><div class="section-header"><h2>History</h2><button class="text-button" data-action="snapshot">Save snapshot</button></div>${historyChart()}</section>
+  <section class="card"><div class="section-header"><h2>History</h2></div>${historyChart()}</section>
   <section class="card">
-    <div class="section-header"><div><p class="section-label">DEBT TRACKER</p><h2>Liabilities</h2></div><button class="button primary" data-add="liability">Add liability</button></div>
+    <div class="section-header"><div><p class="section-label">DEBT TRACKER</p><h2>Liabilities</h2></div></div>
     <div class="metric-grid liability-summary">
       ${metric("Total payable", formatMoney(totalPayable))}
       ${metric("Amount paid", formatMoney(totalPaid), "positive")}
@@ -780,12 +839,8 @@ function renderNetWorth() {
     <div class="liability-grid">${liabilitySummaries.length ? liabilitySummaries.map(({ item, values }) => `<article class="liability-card">
       <div class="section-header">
         <div>
-          <h3>${escapeHtml(item.name)}</h3>
+          <h3>${escapeHtml(item.name)}${item.import?.managed ? ` <span class="status-badge">Imported</span>` : ""}</h3>
           <p class="muted liability-subtitle">${escapeHtml(item.type || "Other")}${item.lender ? ` · ${escapeHtml(item.lender)}` : ""}</p>
-        </div>
-        <div class="list-actions">
-          <button class="mini-button" data-edit="liability" data-id="${item.id}" aria-label="Edit ${escapeHtml(item.name)}">✎</button>
-          <button class="mini-button danger" data-delete="liability" data-id="${item.id}" aria-label="Delete ${escapeHtml(item.name)}">×</button>
         </div>
       </div>
       <div class="split-row liability-balance"><span>Remaining</span><strong class="${values.remainingAmount > 0 ? "negative" : "positive"}">${formatMoney(values.remainingAmount)}</strong></div>
@@ -802,7 +857,7 @@ function renderNetWorth() {
       </div>
       ${item.startDate ? `<p class="muted liability-dates">Started ${formatDate(item.startDate)}${item.endDate ? ` · Due ${formatDate(item.endDate)}` : ""}</p>` : ""}
       ${item.notes ? `<p class="liability-notes">${escapeHtml(item.notes)}</p>` : ""}
-    </article>`).join("") : emptyState("No liabilities recorded. Add a loan, credit-card balance, EMI, or other debt.")}</div>
+    </article>`).join("") : emptyState("No liabilities recorded. Add one in the workbook Liabilities sheet.")}</div>
   </section>`;
 }
 
@@ -815,14 +870,21 @@ function categorySettings(group, title) {
     ? items.reduce((sum, item) => sum + Number(item.actualAmount || 0), 0)
     : 0;
   return `<section class="card">
-    <div class="section-header"><h2>${escapeHtml(title)}</h2><button class="text-button" data-add-category="${group}">Add</button></div>
+    <div class="section-header"><h2>${escapeHtml(title)}</h2></div>
     ${items.map((item) => `<div class="category-row">
       <span>${escapeHtml(item.icon || "")} ${escapeHtml(item.name)}${group === "investment" ? ` · Target ${formatMoney(item.targetAmount)} (${targetTotal > 0 ? ((Number(item.targetAmount || 0) / targetTotal) * 100).toFixed(1) : "0.0"}%) · Actual ${formatMoney(item.actualAmount)} (${actualTotal > 0 ? ((Number(item.actualAmount || 0) / actualTotal) * 100).toFixed(1) : "0.0"}%)` : ""}${group === "expense" ? ` · ${formatMoney(item.budget)} plan` : ""}</span>
-      <div class="list-actions">
-        <button class="mini-button" data-edit-category="${item.id}">✎</button>
-        <button class="mini-button danger" data-delete-category="${item.id}">×</button>
-      </div>
     </div>`).join("")}
+  </section>`;
+}
+
+function bankSettings() {
+  return `<section class="card">
+    <div class="section-header"><div><p class="section-label">BANK DIRECTORY</p><h2>Bank accounts</h2></div></div>
+    <p class="muted">These banks appear in account and card dropdowns. Logo marks are stored locally and work offline.</p>
+    <div class="bank-directory">${state.data.banks.slice().sort((a, b) => a.name.localeCompare(b.name)).map((bank) => `<div class="bank-directory-item">
+      ${bankMark(bank)}
+      <span><strong>${escapeHtml(bank.name)}</strong><small>${escapeHtml(bank.shortName)}</small></span>
+    </div>`).join("")}</div>
   </section>`;
 }
 
@@ -860,17 +922,158 @@ function renderSettings() {
       ${categorySettings("investment", "Investment categories")}
       ${categorySettings("expense", "Expense categories")}
       ${categorySettings("account", "Account types")}
+      ${bankSettings()}
+      <section class="card">
+        <div class="section-header"><h2>Spreadsheet update</h2></div>
+        <p class="muted">Download the Excel-compatible CSV, fill rows marked Include=Yes, then preview and apply it. Each upload replaces earlier imported rows while keeping entries added in the app.</p>
+        <div class="button-row">
+          <button class="button secondary" data-action="download-spreadsheet-template">Download template</button>
+          <button class="button primary" data-action="import-spreadsheet">Choose CSV</button>
+          <button class="button secondary" data-route-link="spreadsheet">Open workbook editor</button>
+        </div>
+      </section>
       <section class="card">
         <div class="section-header"><h2>Data</h2></div>
-        <p class="muted">Backups contain all financial data in readable JSON. Store them somewhere safe.</p>
+        <p class="muted">Encrypted backups protect your financial data with a password that never leaves this device.</p>
         <div class="button-row">
-          <button class="button primary" data-action="export-backup">Export backup</button>
+          <button class="button primary" data-action="export-backup">Export encrypted backup</button>
           <button class="button secondary" data-action="import-backup">Import backup</button>
           <button class="button secondary" data-action="export-csv">Export CSV</button>
+          <button class="text-button" data-action="export-readable-backup">Export readable JSON</button>
           <button class="button danger-button" data-action="clear-data">Clear all data</button>
         </div>
       </section>
     </div>`;
+}
+
+function initializeWorkbookDraft() {
+  if (workbookDraft) return;
+  workbookDraft = Object.fromEntries(WORKBOOK_SHEETS.map((sheet) => [sheet.id, structuredClone(state.data[sheet.id] || [])]));
+  activeWorkbookSheet = WORKBOOK_SHEETS.some((sheet) => sheet.id === activeWorkbookSheet) ? activeWorkbookSheet : "accounts";
+  workbookDirty = false;
+  activeWorkbookCell = null;
+}
+
+function workbookSheet() {
+  return WORKBOOK_SHEETS.find((sheet) => sheet.id === activeWorkbookSheet) || WORKBOOK_SHEETS[0];
+}
+
+function workbookCellValue(record, column) {
+  const value = record[column.key];
+  if (column.array) return Array.isArray(value) ? value.join(", ") : value || "";
+  if (column.type === "datetime-local" && value) return String(value).slice(0, 16);
+  return value ?? column.default ?? "";
+}
+
+function workbookColumnOptions(column) {
+  if (column.options) return column.options();
+  if (column.values) return column.values.map((value) => ({ value, label: value }));
+  return null;
+}
+
+function workbookCell(record, column, rowIndex, columnIndex) {
+  const value = workbookCellValue(record, column);
+  const options = workbookColumnOptions(column);
+  const common = `data-workbook-cell data-key="${escapeHtml(column.key)}" data-column="${columnIndex}" aria-label="${escapeHtml(column.label)} row ${rowIndex + 1}"`;
+  if (options) {
+    const hasValue = options.some((option) => option.value === value);
+    return `<select ${common}>${!hasValue && value ? `<option value="${escapeHtml(value)}" selected>${escapeHtml(value)} (missing)</option>` : ""}${options.map((option) => `<option value="${escapeHtml(option.value)}" ${option.value === value ? "selected" : ""}>${escapeHtml(option.label)}</option>`).join("")}</select>`;
+  }
+  const type = column.type || "text";
+  return `<input ${common} type="${type}" value="${escapeHtml(value)}" ${type === "number" ? 'step="any"' : ""} ${column.required ? "required" : ""}>`;
+}
+
+function workbookRow(record, rowIndex) {
+  const sheet = workbookSheet();
+  return `<tr data-workbook-row data-index="${rowIndex}">
+    <th class="sheet-row-number" scope="row">${rowIndex + 1}</th>
+    ${sheet.columns.map((column, columnIndex) => `<td>${workbookCell(record, column, rowIndex, columnIndex)}</td>`).join("")}
+    <td><button class="mini-button danger" data-workbook-delete-row type="button" aria-label="Delete row ${rowIndex + 1}">×</button></td>
+  </tr>`;
+}
+
+function captureWorkbookSheet() {
+  const grid = main.querySelector("#workbook-grid-body");
+  if (!grid || !workbookDraft) return;
+  const sheet = workbookSheet();
+  const previous = workbookDraft[sheet.id];
+  workbookDraft[sheet.id] = Array.from(grid.querySelectorAll("[data-workbook-row]")).map((row, rowIndex) => {
+    const record = { ...(previous[Number(row.dataset.index)] || {}) };
+    for (const column of sheet.columns) {
+      const input = row.querySelector(`[data-key="${column.key}"]`);
+      let value = input?.value ?? "";
+      if (column.type === "number") value = value === "" ? 0 : Number(value);
+      if (column.array) value = value.split(",").map((item) => item.trim()).filter(Boolean);
+      if (column.type === "datetime-local" && value) value = new Date(value).toISOString();
+      record[column.key] = value;
+    }
+    row.dataset.index = String(rowIndex);
+    return record;
+  });
+}
+
+function blankWorkbookRecord(sheet) {
+  return Object.fromEntries(sheet.columns.map((column) => {
+    if (column.key === "id") return [column.key, createId(sheet.prefix)];
+    if (column.default !== undefined) return [column.key, column.default];
+    if (column.type === "number") return [column.key, 0];
+    if (column.array) return [column.key, []];
+    return [column.key, ""];
+  }));
+}
+
+function validateWorkbook() {
+  for (const sheet of WORKBOOK_SHEETS) {
+    const ids = new Set();
+    for (const [index, record] of workbookDraft[sheet.id].entries()) {
+      for (const column of sheet.columns) {
+        const value = record[column.key];
+        if (column.required && String(value ?? "").trim() === "") throw new Error(`${sheet.label} row ${index + 1}: ${column.label} is required.`);
+        if (column.type === "number" && value !== undefined && value !== null && value !== "" && !Number.isFinite(value)) {
+          throw new Error(`${sheet.label} row ${index + 1}: ${column.label} must be a number.`);
+        }
+      }
+      if (ids.has(record.id)) throw new Error(`${sheet.label} row ${index + 1}: duplicate ID "${record.id}".`);
+      ids.add(record.id);
+    }
+  }
+}
+
+async function saveWorkbook(exitAfterSave = false) {
+  captureWorkbookSheet();
+  validateWorkbook();
+  await replaceWorkbookData(workbookDraft);
+  workbookDirty = false;
+  workbookDraft = null;
+  await loadState();
+  if (exitAfterSave) routeTo("home");
+  else {
+    initializeWorkbookDraft();
+    renderSpreadsheet();
+    showToast("Workbook saved.");
+  }
+}
+
+function renderSpreadsheet() {
+  initializeWorkbookDraft();
+  const sheet = workbookSheet();
+  const rows = workbookDraft[sheet.id];
+  main.className = "workbook-main";
+  main.innerHTML = `<section class="workbook-shell">
+    <header class="workbook-header">
+      <div><p class="section-label">MY WEALTH WORKBOOK</p><h2>${escapeHtml(sheet.label)}</h2></div>
+      <div class="workbook-actions"><span class="status-badge">${workbookDirty ? "Unsaved changes" : "Saved"}</span><button class="button secondary" data-workbook-exit type="button">Exit</button><button class="button secondary" data-workbook-save type="button">Save</button><button class="button primary" data-workbook-save-exit type="button">Save &amp; exit</button></div>
+    </header>
+    <div class="workbook-toolbar">
+      <button class="button secondary" data-workbook-add-row type="button">＋ Add row</button>
+      <button class="button secondary" data-workbook-duplicate-row type="button">⧉ Duplicate</button>
+      <span class="status-badge" id="workbook-row-count">${rows.length} rows</span>
+      <span class="workbook-help">Select a cell to edit, or paste a value directly.</span>
+    </div>
+    <div class="sheet-formula-bar workbook-formula"><strong id="workbook-cell-address">--</strong><input id="workbook-formula-input" type="text" aria-label="Selected workbook cell value" placeholder="Select a cell"></div>
+    <div class="workbook-grid-wrap"><table class="sheet-grid workbook-grid"><thead><tr><th class="sheet-corner">#</th>${sheet.columns.map((column, index) => `<th><span>${excelColumnName(index)}</span>${escapeHtml(column.label)}</th>`).join("")}<th>Delete</th></tr></thead><tbody id="workbook-grid-body">${rows.map(workbookRow).join("")}</tbody></table></div>
+    <nav class="workbook-tabs" aria-label="Workbook sheets">${WORKBOOK_SHEETS.map((entry) => `<button type="button" data-workbook-sheet="${entry.id}" class="${entry.id === sheet.id ? "active" : ""}"><span aria-hidden="true">${entry.icon}</span>${escapeHtml(entry.label)}<small>${workbookDraft[entry.id].length}</small></button>`).join("")}</nav>
+  </section>`;
 }
 
 function renderInvestmentCategories() {
@@ -880,11 +1083,11 @@ function renderInvestmentCategories() {
       <div class="section-header">
         <div>
           <p class="section-label">PORTFOLIO ALLOCATION</p>
-          <h2>Edit target and actual amounts</h2>
+          <h2>Target and actual amounts</h2>
         </div>
         <button class="text-button" data-route-link="investments">Back</button>
       </div>
-      <p class="muted">Only investment categories are shown here. Edit a category to update its target and actual INR amounts.</p>
+      <p class="muted">Only investment categories are shown here. Open the workbook Categories sheet to update target and actual INR amounts.</p>
     </section>
     ${categorySettings("investment", "Investment categories")}`;
 }
@@ -902,15 +1105,17 @@ const renderers = {
   cards: renderCards,
   strategy: renderStrategy,
   networth: renderNetWorth,
+  spreadsheet: renderSpreadsheet,
   settings: renderSettings
 };
 
 function render() {
+  document.body.classList.toggle("workbook-mode", state.route === "spreadsheet");
   pageTitle.textContent = routeTitles[state.route];
   document.querySelectorAll(".nav-item").forEach((item) => {
     const activeRoute = state.route === "investment-categories"
       ? "investments"
-      : ["transactions", "goals", "plans", "cards", "strategy", "networth", "settings"].includes(state.route) ? "more" : state.route;
+      : ["transactions", "goals", "plans", "cards", "strategy", "networth", "spreadsheet", "settings"].includes(state.route) ? "more" : state.route;
     item.classList.toggle("active", item.dataset.route === activeRoute);
     item.setAttribute("aria-current", item.dataset.route === activeRoute ? "page" : "false");
   });
@@ -931,8 +1136,11 @@ function field(name, label, type = "text", value = "", options = {}) {
     options.required ? "required" : "",
     options.min !== undefined ? `min="${options.min}"` : "",
     options.max !== undefined ? `max="${options.max}"` : "",
+    options.minlength !== undefined ? `minlength="${options.minlength}"` : "",
+    options.maxlength !== undefined ? `maxlength="${options.maxlength}"` : "",
     options.step ? `step="${options.step}"` : "",
-    options.placeholder ? `placeholder="${escapeHtml(options.placeholder)}"` : ""
+    options.placeholder ? `placeholder="${escapeHtml(options.placeholder)}"` : "",
+    options.autocomplete ? `autocomplete="${escapeHtml(options.autocomplete)}"` : ""
   ].filter(Boolean).join(" ");
   return `<label class="${options.full ? "field-full" : ""}"><span>${escapeHtml(label)}</span><input name="${name}" type="${type}" value="${escapeHtml(value)}" ${attributes}></label>`;
 }
@@ -962,12 +1170,21 @@ function textArea(name, label, value = "") {
 }
 
 function openDialog(title, body, submitHandler, saveLabel = "Save") {
+  dialog.classList.remove("spreadsheet-dialog");
   dialogTitle.textContent = title;
   dialogBody.innerHTML = `<div class="form-grid">${body}</div>`;
   dialogSave.textContent = saveLabel;
   dialogSubmitHandler = submitHandler;
   dialog.showModal();
   dialogBody.querySelector("input, select, textarea")?.focus();
+}
+
+function excelColumnName(index) {
+  let name = "";
+  for (let value = index + 1; value > 0; value = Math.floor((value - 1) / 26)) {
+    name = String.fromCharCode(65 + ((value - 1) % 26)) + name;
+  }
+  return name;
 }
 
 function formValue(formData, key) {
@@ -1039,6 +1256,7 @@ function openTransactionForm(item = {}, forcedType) {
 function openAccountForm(item = {}) {
   openDialog(item.id ? "Edit account" : "Add account", `
     ${field("name", "Account name", "text", item.name, { required: true, full: true })}
+    ${selectField("bankId", "Bank", bankOptions(item.bankId), true)}
     ${categoryChoiceField("typeId", "Account type", "account", item.typeId)}
     ${field("balance", "Current balance", "number", item.balance, { step: "0.01" })}
     ${field("targetBalance", "Balance expectation", "number", item.targetBalance, { min: 0, step: "0.01" })}
@@ -1051,6 +1269,7 @@ function openAccountForm(item = {}) {
       ...item,
       id: item.id || createId("account"),
       name: formValue(formData, "name"),
+      bankId: formValue(formData, "bankId"),
       typeId: formValue(formData, "typeId"),
       balance: Number(formValue(formData, "balance")),
       targetBalance: Number(formValue(formData, "targetBalance")),
@@ -1120,7 +1339,7 @@ function openCardForm(item = {}) {
     ${field("name", "Card name", "text", item.name, { required: true, full: true })}
     ${selectField("icon", "Card icon", iconOptions)}
     ${selectField("status", "Status", selectOptions(["Current", "Future"], item.status || "Current"))}
-    ${field("bank", "Linked bank", "text", item.bank)}
+    ${selectField("bankId", "Linked bank", bankOptions(item.bankId), true)}
     ${field("purpose", "Purpose and benefits", "text", item.purpose, { full: true })}
     ${textArea("notes", "Notes", item.notes)}
   `, async (formData) => {
@@ -1130,7 +1349,8 @@ function openCardForm(item = {}) {
       name: formValue(formData, "name"),
       icon: formValue(formData, "icon"),
       status: formValue(formData, "status"),
-      bank: formValue(formData, "bank"),
+      bankId: formValue(formData, "bankId"),
+      bank: "",
       purpose: formValue(formData, "purpose"),
       notes: formValue(formData, "notes")
     });
@@ -1239,6 +1459,26 @@ function openCategoryForm(group, item = {}) {
   });
 }
 
+function openBankForm(item = {}) {
+  openDialog(item.id ? "Edit bank" : "Add bank", `
+    ${field("name", "Bank name", "text", item.name, { required: true, full: true })}
+    ${field("shortName", "Logo text", "text", item.shortName, { required: true, maxlength: 8, placeholder: "SBI" })}
+    ${field("color", "Logo color", "color", item.color || "#176b5b")}
+  `, async (formData) => {
+    const name = formValue(formData, "name");
+    const duplicate = state.data.banks.some((bank) => bank.id !== item.id && bank.name.toLowerCase() === name.toLowerCase());
+    if (duplicate) throw new Error("A bank with this name already exists.");
+    await putOne("banks", {
+      ...item,
+      id: item.id || createId("bank"),
+      name,
+      shortName: formValue(formData, "shortName").toUpperCase(),
+      color: formValue(formData, "color"),
+      aliases: item.aliases || []
+    });
+  });
+}
+
 const formOpeners = {
   investment: openInvestmentForm,
   expense: (item) => openTransactionForm(item, "Expense"),
@@ -1278,10 +1518,116 @@ function downloadFile(name, content, type) {
   setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
-async function exportBackup() {
+function bytesToBase64(bytes) {
+  let binary = "";
+  for (let offset = 0; offset < bytes.length; offset += 32768) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + 32768));
+  }
+  return btoa(binary);
+}
+
+function base64ToBytes(value) {
+  const binary = atob(value);
+  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+}
+
+async function deriveBackupKey(password, salt, iterations, usage) {
+  const keyMaterial = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(password),
+    "PBKDF2",
+    false,
+    ["deriveKey"]
+  );
+  return crypto.subtle.deriveKey(
+    { name: "PBKDF2", hash: "SHA-256", salt, iterations },
+    keyMaterial,
+    { name: "AES-GCM", length: 256 },
+    false,
+    [usage]
+  );
+}
+
+async function encryptBackup(backup, password) {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const iterations = 310000;
+  const key = await deriveBackupKey(password, salt, iterations, "encrypt");
+  const plaintext = new TextEncoder().encode(JSON.stringify(backup));
+  const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, plaintext);
+  return {
+    app: "My Wealth",
+    format: "encrypted-backup",
+    version: 1,
+    exportedAt: backup.exportedAt,
+    encryption: {
+      algorithm: "AES-GCM",
+      kdf: "PBKDF2-SHA-256",
+      iterations,
+      salt: bytesToBase64(salt),
+      iv: bytesToBase64(iv)
+    },
+    data: bytesToBase64(new Uint8Array(ciphertext))
+  };
+}
+
+async function decryptBackup(envelope, password) {
+  if (envelope?.app !== "My Wealth" || envelope.format !== "encrypted-backup" || envelope.version !== 1) {
+    throw new Error("This is not a supported encrypted My Wealth backup.");
+  }
+  const { encryption } = envelope;
+  if (encryption?.algorithm !== "AES-GCM" || encryption.kdf !== "PBKDF2-SHA-256" || encryption.iterations !== 310000) {
+    throw new Error("This backup uses unsupported encryption settings.");
+  }
+  try {
+    const salt = base64ToBytes(encryption.salt);
+    const iv = base64ToBytes(encryption.iv);
+    if (salt.length !== 16 || iv.length !== 12) throw new Error("Invalid encryption parameters.");
+    const key = await deriveBackupKey(password, salt, encryption.iterations, "decrypt");
+    const plaintext = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, base64ToBytes(envelope.data));
+    return JSON.parse(new TextDecoder().decode(plaintext));
+  } catch (error) {
+    console.error("Backup decryption failed:", error);
+    throw new Error("Could not unlock this backup. Check the password and file.");
+  }
+}
+
+function openBackupExportDialog() {
+  openDialog("Export encrypted backup", `
+    <p class="field-full muted">Use a unique password with at least 12 characters. It cannot be recovered if forgotten.</p>
+    ${field("backupPassword", "Backup password", "password", "", { required: true, full: true, minlength: 12, autocomplete: "new-password" })}
+    ${field("backupPasswordConfirm", "Confirm password", "password", "", { required: true, full: true, minlength: 12, autocomplete: "new-password" })}
+  `, async (formData) => {
+    const password = formValue(formData, "backupPassword");
+    if (password.length < 12) {
+      throw new Error("Backup password must contain at least 12 non-space characters.");
+    }
+    if (password !== formValue(formData, "backupPasswordConfirm")) {
+      throw new Error("Backup passwords do not match.");
+    }
+    const backup = await exportAllData();
+    const encrypted = await encryptBackup(backup, password);
+    downloadFile(`my-wealth-backup-${today()}.wealth`, JSON.stringify(encrypted), "application/json");
+    return "Encrypted backup exported.";
+  }, "Encrypt & export");
+}
+
+function openBackupImportDialog(envelope) {
+  openDialog("Unlock encrypted backup", `
+    <p class="field-full muted">Enter the password used when this backup was exported.</p>
+    ${field("backupPassword", "Backup password", "password", "", { required: true, full: true, autocomplete: "current-password" })}
+  `, async (formData) => {
+    const backup = await decryptBackup(envelope, formValue(formData, "backupPassword"));
+    await importAllData(backup);
+    await initializeDatabase();
+    return "Encrypted backup restored.";
+  }, "Unlock & restore");
+}
+
+async function exportLegacyBackup() {
   const backup = await exportAllData();
   downloadFile(`my-wealth-backup-${today()}.json`, JSON.stringify(backup, null, 2), "application/json");
-  showToast("Backup exported.");
+  showToast("Readable backup exported.");
 }
 
 function csvCell(value) {
@@ -1328,11 +1674,11 @@ dialogForm.addEventListener("submit", async (event) => {
 
   dialogSave.disabled = true;
   try {
-    await dialogSubmitHandler(new FormData(dialogForm));
+    const successMessage = await dialogSubmitHandler(new FormData(dialogForm));
     dialog.close();
     await loadState();
     render();
-    showToast("Saved.");
+    showToast(successMessage || "Saved.");
   } catch (error) {
     console.error(error);
     showToast(error.message || "Could not save.");
@@ -1346,20 +1692,7 @@ document.querySelector(".bottom-nav").addEventListener("click", (event) => {
   if (button) routeTo(button.dataset.route);
 });
 
-document.querySelector("#quick-add-button").addEventListener("click", () => {
-  const type = {
-    investments: "investment",
-    expenses: "expense",
-    accounts: "account",
-    goals: "goal",
-    plans: "plan",
-    cards: "card",
-    strategy: "product",
-    networth: "liability",
-    transactions: "transaction"
-  }[state.route] || "transaction";
-  formOpeners[type]();
-});
+document.querySelector("#quick-add-button").addEventListener("click", () => routeTo("spreadsheet"));
 
 themeToggleButton.addEventListener("click", async () => {
   const darkTheme = state.settings.theme === "dark" ||
@@ -1372,6 +1705,71 @@ themeToggleButton.addEventListener("click", async () => {
 main.addEventListener("click", async (event) => {
   const routeLink = event.target.closest("[data-route-link]");
   if (routeLink) return routeTo(routeLink.dataset.routeLink);
+
+  const workbookTab = event.target.closest("[data-workbook-sheet]");
+  if (workbookTab) {
+    captureWorkbookSheet();
+    activeWorkbookSheet = workbookTab.dataset.workbookSheet;
+    activeWorkbookCell = null;
+    renderSpreadsheet();
+    return;
+  }
+
+  if (event.target.closest("[data-workbook-add-row]")) {
+    captureWorkbookSheet();
+    const sheet = workbookSheet();
+    workbookDraft[sheet.id].push(blankWorkbookRecord(sheet));
+    workbookDirty = true;
+    renderSpreadsheet();
+    main.querySelector("[data-workbook-row]:last-child [data-workbook-cell]")?.focus();
+    return;
+  }
+
+  if (event.target.closest("[data-workbook-duplicate-row]")) {
+    captureWorkbookSheet();
+    const sheet = workbookSheet();
+    const selectedRow = activeWorkbookCell?.closest("[data-workbook-row]");
+    const source = workbookDraft[sheet.id][Number(selectedRow?.dataset.index ?? 0)];
+    if (!source) return showToast("Select a row to duplicate.");
+    const duplicate = structuredClone(source);
+    duplicate.id = createId(sheet.prefix);
+    if (duplicate.name) duplicate.name = `${duplicate.name} copy`;
+    workbookDraft[sheet.id].push(duplicate);
+    workbookDirty = true;
+    renderSpreadsheet();
+    return;
+  }
+
+  const workbookDelete = event.target.closest("[data-workbook-delete-row]");
+  if (workbookDelete) {
+    const index = Number(workbookDelete.closest("[data-workbook-row]").dataset.index);
+    captureWorkbookSheet();
+    workbookDraft[activeWorkbookSheet].splice(index, 1);
+    workbookDirty = true;
+    activeWorkbookCell = null;
+    renderSpreadsheet();
+    return;
+  }
+
+  if (event.target.closest("[data-workbook-save], [data-workbook-save-exit]")) {
+    try {
+      await saveWorkbook(Boolean(event.target.closest("[data-workbook-save-exit]")));
+      if (state.route === "home") showToast("Workbook saved. View mode restored.");
+    } catch (error) {
+      console.error(error);
+      showToast(error.message || "Workbook could not be saved.");
+    }
+    return;
+  }
+
+  if (event.target.closest("[data-workbook-exit]")) {
+    if (workbookDirty && !confirm("Exit workbook without saving your changes?")) return;
+    workbookDraft = null;
+    workbookDirty = false;
+    activeWorkbookCell = null;
+    routeTo("home");
+    return;
+  }
 
   const planToggle = event.target.closest("[data-toggle-plan]");
   if (planToggle) {
@@ -1434,6 +1832,29 @@ main.addEventListener("click", async (event) => {
   const addCategory = event.target.closest("[data-add-category]");
   if (addCategory) return openCategoryForm(addCategory.dataset.addCategory);
 
+  if (event.target.closest("[data-add-bank]")) return openBankForm();
+
+  const editBank = event.target.closest("[data-edit-bank]");
+  if (editBank) {
+    const bank = bankById(editBank.dataset.editBank);
+    if (bank) openBankForm(bank);
+    return;
+  }
+
+  const deleteBank = event.target.closest("[data-delete-bank]");
+  if (deleteBank) {
+    const bank = bankById(deleteBank.dataset.deleteBank);
+    const inUse = state.data.accounts.some((item) => item.bankId === bank?.id) || state.data.cards.some((item) => item.bankId === bank?.id);
+    if (inUse) return showToast("This bank is linked to an account or card.");
+    if (bank && confirm(`Delete ${bank.name} from the bank list?`)) {
+      await deleteOne("banks", bank.id);
+      await loadState();
+      renderSettings();
+      showToast("Bank removed.");
+    }
+    return;
+  }
+
   const editCategory = event.target.closest("[data-edit-category]");
   if (editCategory) {
     const item = state.data.categories.find((entry) => entry.id === editCategory.dataset.editCategory);
@@ -1464,9 +1885,12 @@ main.addEventListener("click", async (event) => {
   const action = event.target.closest("[data-action]")?.dataset.action;
   if (!action) return;
   try {
-    if (action === "export-backup") await exportBackup();
+    if (action === "download-spreadsheet-template") downloadFile("my-wealth-import-template.csv", `\uFEFF${spreadsheetTemplate()}`, "text/csv;charset=utf-8");
+    if (action === "import-spreadsheet") spreadsheetInput.click();
+    if (action === "export-backup") openBackupExportDialog();
+    if (action === "export-readable-backup" && confirm("Export an unencrypted JSON backup? Anyone with the file can read all financial data.")) await exportLegacyBackup();
     if (action === "import-backup") backupInput.click();
-    if (action === "export-csv") exportCsv();
+    if (action === "export-csv" && confirm("Export an unencrypted CSV? Anyone with the file can read its financial data.")) exportCsv();
     if (action === "snapshot") {
       await createNetWorthSnapshot();
       await loadState();
@@ -1486,7 +1910,31 @@ main.addEventListener("click", async (event) => {
   }
 });
 
+main.addEventListener("focusin", (event) => {
+  const cell = event.target.closest("[data-workbook-cell]");
+  if (!cell) return;
+  activeWorkbookCell?.classList.remove("sheet-cell-active");
+  activeWorkbookCell = cell;
+  cell.classList.add("sheet-cell-active");
+  const rowIndex = Number(cell.closest("[data-workbook-row]").dataset.index);
+  const address = main.querySelector("#workbook-cell-address");
+  const formula = main.querySelector("#workbook-formula-input");
+  if (address) address.textContent = `${excelColumnName(Number(cell.dataset.column))}${rowIndex + 1}`;
+  if (formula) formula.value = cell.value;
+});
+
 main.addEventListener("input", async (event) => {
+  if (event.target.matches("[data-workbook-cell]")) {
+    workbookDirty = true;
+    main.querySelector(".workbook-actions .status-badge").textContent = "Unsaved changes";
+    if (event.target === activeWorkbookCell) main.querySelector("#workbook-formula-input").value = event.target.value;
+    return;
+  }
+  if (event.target.id === "workbook-formula-input" && activeWorkbookCell) {
+    activeWorkbookCell.value = event.target.value;
+    activeWorkbookCell.dispatchEvent(new Event("input", { bubbles: true }));
+    return;
+  }
   if (event.target.id === "investment-search") {
     state.filters.investment = event.target.value;
     renderInvestments();
@@ -1546,7 +1994,13 @@ backupInput.addEventListener("change", async () => {
   backupInput.value = "";
   if (!file) return;
   try {
+    if (file.size > 20 * 1024 * 1024) throw new Error("Backup files must be 20 MB or smaller.");
     const backup = JSON.parse(await file.text());
+    if (backup?.format === "encrypted-backup") {
+      if (!confirm("Unlock and restore this encrypted backup? Current data will be replaced.")) return;
+      openBackupImportDialog(backup);
+      return;
+    }
     if (!confirm(`Restore backup from ${backup.exportedAt ? formatDate(backup.exportedAt.slice(0, 10)) : "this file"}? Current data will be replaced.`)) return;
     await importAllData(backup);
     await initializeDatabase();
@@ -1559,9 +2013,39 @@ backupInput.addEventListener("change", async () => {
   }
 });
 
+spreadsheetInput.addEventListener("change", async () => {
+  const [file] = spreadsheetInput.files;
+  spreadsheetInput.value = "";
+  if (!file) return;
+  try {
+    const parsed = await parseSpreadsheet(await file.text(), state.data.categories, file.name, state.data.banks);
+    const summary = parsed.summary;
+    openDialog("Apply spreadsheet update", `
+      <p class="field-full muted">${escapeHtml(file.name)} is valid. Applying it will replace all earlier imported rows and preserve manual entries.</p>
+      <div class="metric-grid field-full">
+        ${metric("Accounts", String(summary.accounts))}
+        ${metric("Investments & PF", String(summary.investments))}
+        ${metric("Transactions", String(summary.transactions))}
+        ${metric("Liabilities", String(summary.liabilities))}
+      </div>
+    `, async () => {
+      await replaceImportedData(parsed.recordsByStore);
+      await createNetWorthSnapshot();
+      return `${summary.total} spreadsheet rows imported.`;
+    }, "Replace imported data");
+  } catch (error) {
+    console.error(error);
+    showToast(error.message || "Could not read the spreadsheet.");
+  }
+});
+
 window.addEventListener("hashchange", () => {
   const route = location.hash.slice(1);
   if (renderers[route]) routeTo(route);
+});
+
+document.addEventListener("visibilitychange", () => {
+  document.body.classList.toggle("app-private", document.hidden);
 });
 
 async function start() {

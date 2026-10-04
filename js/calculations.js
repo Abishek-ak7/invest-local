@@ -51,6 +51,21 @@ export function liabilityValues(liability) {
     0
   );
   const paidAmount = Math.max(number(liability.paidAmount), 0);
+  if (liability.import?.managed === true) {
+    const monthlyPayment = Math.max(number(liability.monthlyPayment), 0);
+    return {
+      principalAmount,
+      interestMethod: liability.interestMethod === "Fixed" ? "Fixed" : "Reducing",
+      totalAmount: principalAmount,
+      totalPayable: principalAmount,
+      totalInterest: 0,
+      paidAmount: 0,
+      remainingAmount: principalAmount,
+      monthlyPayment,
+      percentage: 0,
+      paymentsRemaining: monthlyPayment > 0 ? Math.ceil(principalAmount / monthlyPayment) : 0
+    };
+  }
   const annualInterestRate = Math.max(number(liability.interestRate), 0);
   const durationMonths = Math.max(Math.trunc(number(liability.durationMonths)), 0);
   const interestMethod = liability.interestMethod === "Fixed" ? "Fixed" : "Reducing";

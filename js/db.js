@@ -1,10 +1,12 @@
 const DB_NAME = "my-wealth";
-const DB_VERSION = 2;
+const DB_VERSION = 5;
 const CATEGORY_ICON_VERSION = 1;
-const CATEGORY_STRUCTURE_VERSION = 2;
+const CATEGORY_STRUCTURE_VERSION = 3;
+const BANK_DIRECTORY_VERSION = 1;
 
 export const STORES = [
   "settings",
+  "banks",
   "accounts",
   "investments",
   "transactions",
@@ -28,6 +30,7 @@ const defaultCategories = [
   { id: "inv-cash", group: "investment", name: "Cash", icon: "💰", target: 9.1743119266, color: "#00a884" },
   { id: "inv-crypto", group: "investment", name: "Crypto", icon: "₿", target: 3.6697247706, color: "#e76f51" },
   { id: "inv-trading", group: "investment", name: "Intraday / Trading", icon: "⚡", target: 3.6697247706, color: "#d14d72" },
+  { id: "inv-pf", group: "investment", name: "Provident Fund", icon: "🛡️", target: 0, color: "#4f6d7a" },
   { id: "inv-other", group: "investment", name: "Other", icon: "🧩", target: 0, color: "#77817d" },
   { id: "exp-1", group: "expense", name: "Rent / Regular", icon: "🏠", color: "#176b5b", budget: 13500 },
   { id: "exp-2", group: "expense", name: "Food / Snacks", icon: "🍽️", color: "#2f80ed", budget: 4000 },
@@ -42,6 +45,29 @@ const defaultCategories = [
   { id: "account-3", group: "account", name: "Wallet", icon: "👛" },
   { id: "account-4", group: "account", name: "Cash", icon: "💵" },
   { id: "account-5", group: "account", name: "Other", icon: "🗂️" }
+];
+
+const defaultBanks = [
+  { id: "bank-sbi", name: "State Bank of India", shortName: "SBI", color: "#2563eb", aliases: ["State Bank of India"] },
+  { id: "bank-icici", name: "ICICI Bank", shortName: "ICICI", color: "#b91c1c", aliases: ["ICICI"] },
+  { id: "bank-tmb", name: "Tamilnad Mercantile Bank", shortName: "TMB", color: "#9d174d", aliases: ["Tamilnad Mercantile Bank Limited"] },
+  { id: "bank-iob", name: "Indian Overseas Bank", shortName: "IOB", color: "#1d4ed8", aliases: ["Indian Overseas Bank"] },
+  { id: "bank-dcb", name: "DCB Bank", shortName: "DCB", color: "#047857", aliases: ["Development Credit Bank"] },
+  { id: "bank-hdfc", name: "HDFC Bank", shortName: "HDFC", color: "#075985", aliases: ["HDFC"] },
+  { id: "bank-axis", name: "Axis Bank", shortName: "AXIS", color: "#97144d", aliases: ["Axis"] },
+  { id: "bank-kotak", name: "Kotak Mahindra Bank", shortName: "KOTAK", color: "#dc2626", aliases: ["Kotak", "Kotak Bank"] },
+  { id: "bank-bob", name: "Bank of Baroda", shortName: "BOB", color: "#ea580c", aliases: ["BOB"] },
+  { id: "bank-canara", name: "Canara Bank", shortName: "CANARA", color: "#0284c7", aliases: ["Canara"] },
+  { id: "bank-indian", name: "Indian Bank", shortName: "IB", color: "#0369a1", aliases: ["Indian"] },
+  { id: "bank-union", name: "Union Bank of India", shortName: "UNION", color: "#1d4ed8", aliases: ["Union Bank"] },
+  { id: "bank-pnb", name: "Punjab National Bank", shortName: "PNB", color: "#881337", aliases: ["Punjab National Bank"] },
+  { id: "bank-idbi", name: "IDBI Bank", shortName: "IDBI", color: "#047857", aliases: ["IDBI"] },
+  { id: "bank-federal", name: "Federal Bank", shortName: "FED", color: "#0369a1", aliases: ["Federal"] },
+  { id: "bank-yes", name: "YES Bank", shortName: "YES", color: "#1d4ed8", aliases: ["YES"] },
+  { id: "bank-indusind", name: "IndusInd Bank", shortName: "IND", color: "#7f1d1d", aliases: ["IndusInd"] },
+  { id: "bank-au", name: "AU Small Finance Bank", shortName: "AU", color: "#ea580c", aliases: ["AU Bank"] },
+  { id: "bank-boi", name: "Bank of India", shortName: "BOI", color: "#0369a1", aliases: ["BOI"] },
+  { id: "bank-uco", name: "UCO Bank", shortName: "UCO", color: "#1d4ed8", aliases: ["UCO"] }
 ];
 
 const defaultSettings = {
@@ -61,7 +87,8 @@ const defaultSettings = {
   },
   categoriesInitialized: true,
   categoryIconVersion: CATEGORY_ICON_VERSION,
-  categoryStructureVersion: CATEGORY_STRUCTURE_VERSION
+  categoryStructureVersion: CATEGORY_STRUCTURE_VERSION,
+  bankDirectoryVersion: BANK_DIRECTORY_VERSION
 };
 
 let databasePromise;
@@ -89,6 +116,7 @@ export function openDatabase() {
 
     request.onupgradeneeded = () => {
       const database = request.result;
+      if (database.objectStoreNames.contains("connections")) database.deleteObjectStore("connections");
       for (const store of STORES) {
         if (!database.objectStoreNames.contains(store)) {
           database.createObjectStore(store, { keyPath: "id" });
@@ -140,6 +168,37 @@ export async function replaceStore(storeName, values) {
   await transactionDone(transaction);
 }
 
+export async function replaceImportedData(recordsByStore) {
+  const importStores = ["accounts", "investments", "transactions", "liabilities"];
+  const database = await openDatabase();
+  const transaction = database.transaction(importStores, "readwrite");
+
+  for (const storeName of importStores) {
+    const store = transaction.objectStore(storeName);
+    const records = await requestToPromise(store.getAll());
+    for (const record of records) {
+      if (record.import?.managed === true || record.sync?.managed === true) store.delete(record.id);
+    }
+    for (const record of recordsByStore[storeName] || []) store.put(record);
+  }
+
+  await transactionDone(transaction);
+}
+
+export async function replaceWorkbookData(recordsByStore) {
+  const workbookStores = STORES.filter((store) => store !== "settings");
+  const database = await openDatabase();
+  const transaction = database.transaction(workbookStores, "readwrite");
+
+  for (const storeName of workbookStores) {
+    const store = transaction.objectStore(storeName);
+    store.clear();
+    for (const record of recordsByStore[storeName] || []) store.put(record);
+  }
+
+  await transactionDone(transaction);
+}
+
 export async function clearAllData() {
   const database = await openDatabase();
   const transaction = database.transaction(STORES, "readwrite");
@@ -151,21 +210,38 @@ export async function exportAllData() {
   const entries = await Promise.all(STORES.map(async (store) => [store, await getAll(store)]));
   return {
     app: "My Wealth",
-    version: 2,
+    version: 3,
     exportedAt: new Date().toISOString(),
     data: Object.fromEntries(entries)
   };
 }
 
 export function validateBackup(backup) {
-  if (!backup || backup.app !== "My Wealth" || ![1, 2].includes(backup.version) || typeof backup.data !== "object") {
+  if (!backup || backup.app !== "My Wealth" || ![1, 2, 3].includes(backup.version) || !backup.data || typeof backup.data !== "object" || Array.isArray(backup.data)) {
     throw new Error("This is not a valid My Wealth backup.");
   }
 
-  for (const store of STORES.filter((name) => !["planCompletions", "cards", "investmentProducts"].includes(name))) {
+  for (const store of STORES.filter((name) => !["banks", "planCompletions", "cards", "investmentProducts"].includes(name))) {
     if (!Array.isArray(backup.data[store])) {
       throw new Error(`Backup is missing the ${store} collection.`);
     }
+  }
+
+  for (const store of STORES) {
+    const records = backup.data[store] || [];
+    if (!Array.isArray(records)) throw new Error(`The ${store} collection is invalid.`);
+    const ids = new Set();
+    for (const record of records) {
+      if (!record || typeof record !== "object" || Array.isArray(record) || typeof record.id !== "string" || !record.id.trim()) {
+        throw new Error(`The ${store} collection contains an invalid record.`);
+      }
+      if (ids.has(record.id)) throw new Error(`The ${store} collection contains duplicate IDs.`);
+      ids.add(record.id);
+    }
+  }
+
+  if (!backup.data.settings.some((record) => record.id === "app")) {
+    throw new Error("Backup is missing application settings.");
   }
 }
 
@@ -212,6 +288,16 @@ export async function initializeDatabase() {
     );
     if (!hasEtfCategory) {
       await putOne("categories", defaultCategories.find((category) => category.id === "inv-etfs"));
+    }
+    const hasPfCategory = categories.some((category) => category.id === "inv-pf");
+    if (!hasPfCategory) {
+      await putOne("categories", defaultCategories.find((category) => category.id === "inv-pf"));
+    }
+  }
+  if (Number(existingSettings?.bankDirectoryVersion || 0) < BANK_DIRECTORY_VERSION) {
+    const bankIds = new Set((await getAll("banks")).map((bank) => bank.id));
+    for (const bank of defaultBanks) {
+      if (!bankIds.has(bank.id)) await putOne("banks", bank);
     }
   }
   const normalizedSettings = {
