@@ -1,11 +1,11 @@
 const number = (value) => Number(value) || 0;
 
 export function totalInvested(investments) {
-  return investments.reduce((total, investment) => total + number(investment.investedAmount), 0);
+  return investments.reduce((total, investment) => total + investmentValues(investment).investedAmount, 0);
 }
 
 export function totalCurrentValue(investments) {
-  return investments.reduce((total, investment) => total + number(investment.currentValue), 0);
+  return investments.reduce((total, investment) => total + investmentValues(investment).currentValue, 0);
 }
 
 export function totalProfit(investments) {
@@ -110,7 +110,7 @@ export function assetAllocation(investments, categories) {
   const categoryValues = investmentCategories.map((category) => {
     const holdingValue = investments
         .filter((investment) => investment.categoryId === category.id)
-        .reduce((sum, investment) => sum + number(investment.currentValue), 0);
+      .reduce((sum, investment) => sum + investmentValues(investment).currentValue, 0);
     return { category, value: holdingValue };
   });
   const actualTotal = categoryValues.reduce((sum, item) => sum + item.value, 0);
@@ -149,10 +149,10 @@ export function monthlyPlanProgress(plans, transactions, month) {
 
 export function investmentValues(investment) {
   const quantity = number(investment.quantity);
-  const buyPrice = number(investment.buyPrice);
   const currentPrice = number(investment.currentPrice);
-  const investedAmount = number(investment.investedAmount) || quantity * buyPrice;
-  const currentValue = number(investment.currentValue) || quantity * currentPrice;
+  const investedAmount = number(investment.investedAmount);
+  const quotedValue = quantity * currentPrice;
+  const currentValue = quotedValue > 0 ? quotedValue : number(investment.currentValue) || investedAmount;
   const profit = currentValue - investedAmount;
   return {
     investedAmount,

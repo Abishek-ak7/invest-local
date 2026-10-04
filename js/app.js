@@ -27,6 +27,7 @@ import {
   totalInvested,
   totalProfit
 } from "./calculations.js";
+import { fetchLatestPrices, normalizeMarketSymbol } from "./market-data.js";
 import { parseSpreadsheet, spreadsheetTemplate } from "./spreadsheet.js";
 
 const main = document.querySelector("#main-content");
@@ -64,6 +65,9 @@ let workbookDraft = null;
 let activeWorkbookSheet = "accounts";
 let activeWorkbookCell = null;
 let workbookDirty = false;
+let priceRefreshPromise = null;
+
+const PRICE_CACHE_DURATION = 15 * 60 * 1000;
 
 const routeTitles = {
   home: "Home",
@@ -74,7 +78,6 @@ const routeTitles = {
   transactions: "Transactions",
   goals: "Goals",
   plans: "Monthly Plan",
-  cards: "Cards",
   strategy: "Investment Plan",
   networth: "Net Worth & Liabilities",
   spreadsheet: "Workbook Editor",
@@ -98,7 +101,7 @@ const WORKBOOK_SHEETS = [
   ] },
   { id: "investments", label: "Investments", icon: "📈", prefix: "investment", columns: [
     { key: "id", label: "ID", required: true }, { key: "name", label: "Name", required: true }, { key: "categoryId", label: "Category", options: workbookSelects.investmentCategory, required: true }, { key: "accountId", label: "Account", options: workbookSelects.account },
-    { key: "quantity", label: "Quantity", type: "number" }, { key: "buyPrice", label: "Buy price", type: "number" }, { key: "investedAmount", label: "Invested", type: "number" }, { key: "currentPrice", label: "Current price", type: "number" }, { key: "currentValue", label: "Current value", type: "number" },
+    { key: "symbol", label: "Market symbol" }, { key: "quantity", label: "Quantity", type: "number" }, { key: "investedAmount", label: "Invested", type: "number" },
     { key: "purchaseDate", label: "Purchase date", type: "date" }, { key: "notes", label: "Notes" }, { key: "currency", label: "Currency", values: ["INR", "USD", "EUR", "GBP", "AED", "SGD"], default: "INR" }
   ] },
   { id: "transactions", label: "Transactions", icon: "↕", prefix: "transaction", columns: [
@@ -120,7 +123,7 @@ const WORKBOOK_SHEETS = [
     { key: "id", label: "ID", required: true }, { key: "planId", label: "Plan", options: workbookSelects.plan, required: true }, { key: "month", label: "Month", type: "month", required: true }, { key: "completedAt", label: "Completed at", type: "datetime-local" }
   ] },
   { id: "cards", label: "Cards", icon: "▣", prefix: "card", columns: [
-    { key: "id", label: "ID", required: true }, { key: "name", label: "Card", required: true }, { key: "icon", label: "Icon" }, { key: "status", label: "Status", values: ["Current", "Future"], default: "Current" }, { key: "bankId", label: "Bank", options: workbookSelects.bank }, { key: "purpose", label: "Purpose" }, { key: "notes", label: "Notes" }
+    { key: "id", label: "ID", required: true }, { key: "name", label: "Card", required: true }, { key: "icon", label: "Icon" }, { key: "status", label: "Status", values: ["Current", "Future"], default: "Current" }, { key: "bankId", label: "Bank", options: workbookSelects.bank }, { key: "creditLimit", label: "Credit limit", type: "number" }, { key: "purpose", label: "Purpose" }, { key: "notes", label: "Notes" }
   ] },
   { id: "investmentProducts", label: "Products", icon: "◇", prefix: "product", columns: [
     { key: "id", label: "ID", required: true }, { key: "name", label: "Product", required: true }, { key: "ticker", label: "Ticker" }, { key: "categoryId", label: "Category", options: workbookSelects.investmentCategory }, { key: "monthlyAmount", label: "Monthly amount", type: "number" }, { key: "charges", label: "Charges %", type: "number" }, { key: "status", label: "Status", values: ["Planned", "Active", "Paused", "Completed"], default: "Planned" }, { key: "exposure", label: "Exposure" }, { key: "notes", label: "Notes" }
@@ -382,6 +385,9 @@ function renderHome() {
   const investedThisMonth = monthlyInvestment(state.data.transactions, month);
   const expenses = totalExpenses(state.data.transactions, month);
   const remaining = monthlyRemaining(state.data.transactions, month);
+  const liabilitySummaries = state.data.liabilities.map((liability) => liabilityValues(liability));
+  const remainingDebt = liabilitySummaries.reduce((sum, liability) => sum + liability.remainingAmount, 0);
+  const monthlyDebtPayments = liabilitySummaries.reduce((sum, liability) => sum + liability.monthlyPayment, 0);
 
   main.className = "dashboard";
   main.innerHTML = `
@@ -407,6 +413,12 @@ function renderHome() {
       ${metric("Current value", formatMoney(totalCurrentValue(state.data.investments)))}
       <div style="height:.65rem"></div>
       ${metric("Total return", `${signedMoney(profit)} (${formatPercent(profitPercentage(state.data.investments))})`, profit < 0 ? "negative" : "positive")}
+    </section>` : ""}
+    ${cardVisible("liabilities") ? `<section class="card span-4">
+      <div class="section-header"><h2>Liabilities</h2><button class="text-button" data-route-link="networth">View all</button></div>
+      ${metric("Remaining debt", formatMoney(remainingDebt), remainingDebt > 0 ? "negative" : "positive")}
+      <div style="height:.65rem"></div>
+      ${metric("Monthly payments", formatMoney(monthlyDebtPayments))}
     </section>` : ""}
     ${cardVisible("allocation") ? `<section class="card span-8"><div class="section-header"><h2>Portfolio allocation</h2></div>${allocationMarkup()}</section>` : ""}
     ${cardVisible("recentTransactions") ? `<section class="card span-7">
@@ -448,7 +460,7 @@ function renderInvestments() {
       </table></div>
     </section>
     <section class="card">
-      <div class="section-header"><h2>Holdings</h2></div>
+      <div class="section-header"><div><h2>Holdings</h2><p class="muted">Prices update online and remain cached for offline use.</p></div><button class="button secondary" data-action="refresh-prices">Refresh prices</button></div>
       <div class="filter-row">
         <input type="search" id="investment-search" placeholder="Search investments" value="${escapeHtml(state.filters.investment)}">
         <select id="investment-category-filter" aria-label="Investment category filter">
@@ -461,6 +473,7 @@ function renderInvestments() {
           <div class="list-main">
             <strong>${escapeHtml(item.name)}${item.import?.managed ? ` <span class="status-badge">Imported</span>` : ""}</strong>
             <small>${escapeHtml(categoryName(item.categoryId))} · ${escapeHtml(accountName(item.accountId))} · ${formatDate(item.purchaseDate)}</small>
+            <small>${item.symbol ? `${escapeHtml(normalizeMarketSymbol(item.symbol))} · ${item.currentPrice ? `${formatMoney(item.currentPrice)} per unit` : "Price pending"}${item.priceUpdatedAt ? ` · Updated ${escapeHtml(new Date(item.priceUpdatedAt).toLocaleString(state.settings.locale))}` : ""}` : "No market symbol"}</small>
           </div>
           <div class="list-value">
             <strong>${formatMoney(values.currentValue)}</strong>
@@ -547,20 +560,31 @@ function renderExpenses() {
 function renderAccounts() {
   const totalBalance = state.data.accounts.reduce((sum, item) => sum + Number(item.balance || 0), 0);
   const totalMonthly = state.data.accounts.reduce((sum, item) => sum + Number(item.monthlyAllocation || 0), 0);
+  const totalCreditLimit = state.data.cards.reduce((sum, card) => sum + Number(card.creditLimit || 0), 0);
   main.className = "";
   main.innerHTML = `
     <section class="metric-grid">
       ${metric("Available cash", formatMoney(totalBalance), totalBalance < 0 ? "negative" : "positive")}
       ${metric("Monthly allocation", formatMoney(totalMonthly))}
-      ${metric("Accounts", String(state.data.accounts.length))}
+      ${metric("Bank accounts", String(state.data.accounts.length))}
+      ${metric("Total credit limit", formatMoney(totalCreditLimit))}
     </section>
     <section class="card">
-      <div class="section-header"><h2>Your accounts</h2></div>
+      <div class="section-header"><h2>Bank accounts</h2></div>
       <div class="list">${state.data.accounts.length ? state.data.accounts.map((item) => `<div class="list-item">
         ${item.bankId ? bankMark(bankById(item.bankId)) : `<span class="entity-icon" aria-hidden="true">${escapeHtml(categoryIcon(item.typeId))}</span>`}
         <div class="list-main"><strong>${escapeHtml(item.name)}${item.import?.managed ? ` <span class="status-badge">Imported</span>` : ""}</strong><small>${escapeHtml(bankName(item.bankId) || item.purpose || categoryName(item.typeId))}</small></div>
         <div class="list-value"><strong class="${Number(item.balance) < 0 ? "negative" : ""}">${formatMoney(item.balance)}</strong><small>${formatMoney(item.monthlyAllocation)} / month</small></div>
-      </div>`).join("") : emptyState("No accounts yet.")}</div>
+      </div>`).join("") : emptyState("No bank accounts yet.")}</div>
+    </section>
+    <section class="card">
+      <div class="section-header"><h2>Credit cards</h2></div>
+      <div class="list">${state.data.cards.length ? state.data.cards.map((card) => `<div class="list-item">
+        <span class="entity-icon" aria-hidden="true">${escapeHtml(card.icon || "💳")}</span>
+        ${card.bankId ? bankMark(bankById(card.bankId), "bank-mark-small") : ""}
+        <div class="list-main"><strong>${escapeHtml(card.name)} <span class="status-badge">${escapeHtml(card.status || "Current")}</span></strong><small>${escapeHtml(bankName(card.bankId) || card.bank || "Bank not selected")}</small></div>
+        <div class="list-value"><strong>${formatMoney(card.creditLimit)}</strong><small>Credit limit</small></div>
+      </div>`).join("") : emptyState("No credit cards yet.")}</div>
     </section>
   `;
 }
@@ -571,7 +595,6 @@ function renderMore() {
     ["plans", "📅", "Monthly plan", "View monthly items and completion streaks"],
     ["strategy", "📈", "Investment plan", "View products, charges, tickers, and exposure"],
     ["goals", "🎯", "Financial goals", "Monitor progress toward your goals"],
-    ["cards", "💳", "Cards", "Track current and future credit cards"],
     ["networth", "⚖️", "Net worth & liabilities", "Track debt, interest, payments, and history"],
     ["spreadsheet", "▦", "Workbook editor", "Edit all app data across workbook sheets"],
     ["settings", "⚙", "Settings", "Customize appearance, categories, and data"]
@@ -683,35 +706,6 @@ function renderPlans() {
       <div class="list-value"><strong>${formatMoney(plan.amount)}</strong><small>${done ? "Completed" : "Pending"}</small></div>
     </div>`;
     }).join("") : emptyState("No monthly plan items yet.")}</div>
-  </section>`;
-}
-
-function renderCards() {
-  const current = state.data.cards.filter((card) => card.status === "Current").length;
-  const cardIcon = (card) => {
-    if (card.icon) return card.icon;
-    const details = `${card.name || ""} ${card.purpose || ""}`.toLowerCase();
-    if (details.includes("fuel")) return "⛽";
-    if (["travel", "forex", "international"].some((word) => details.includes(word))) return "✈️";
-    if (details.includes("upi")) return "📱";
-    if (details.includes("cashback")) return "💰";
-    if (["shopping", "amazon"].some((word) => details.includes(word))) return "🛍️";
-    if (["food", "dining"].some((word) => details.includes(word))) return "🍽️";
-    if (["reward", "points"].some((word) => details.includes(word))) return "🎁";
-    return "💳";
-  };
-  main.className = "";
-  main.innerHTML = `<section class="metric-grid">
-    ${metric("Current cards", String(current))}
-    ${metric("Future cards", String(state.data.cards.length - current))}
-  </section>
-  <section class="card">
-    <div class="section-header"><h2>Card plan</h2></div>
-    <div class="list">${state.data.cards.length ? state.data.cards.map((card) => `<div class="list-item">
-      <span class="entity-icon" aria-hidden="true">${escapeHtml(cardIcon(card))}</span>
-      ${card.bankId ? bankMark(bankById(card.bankId), "bank-mark-small") : ""}
-      <div class="list-main"><strong>${escapeHtml(card.name)} <span class="status-badge">${escapeHtml(card.status)}</span></strong><small>${escapeHtml(card.purpose || "No purpose set")}${bankName(card.bankId) || card.bank ? ` · ${escapeHtml(bankName(card.bankId) || card.bank)}` : ""}</small></div>
-    </div>`).join("") : emptyState("No cards yet.")}</div>
   </section>`;
 }
 
@@ -838,6 +832,7 @@ function renderSettings() {
     cash: "Cash",
     goals: "Goals",
     allocation: "Allocation",
+    liabilities: "Liabilities",
     recentTransactions: "Recent transactions"
   };
   main.className = "";
@@ -859,6 +854,13 @@ function renderSettings() {
           <label><span>Currency</span><select id="currency-setting">
             ${["INR", "USD", "EUR", "GBP", "AED", "SGD"].map((currency) => `<option value="${currency}" ${currency === state.settings.currency ? "selected" : ""}>${currency}</option>`).join("")}
           </select></label>
+        </div>
+      </section>
+      <section class="card">
+        <div class="section-header"><h2>Live investment prices</h2></div>
+        <div class="form-grid">
+          <label class="field-full"><span>Twelve Data API key</span><input id="market-data-api-key" type="password" value="${escapeHtml(state.settings.marketDataApiKey || "")}" autocomplete="off" placeholder="Enter API key"></label>
+          <div class="button-row field-full"><button class="button primary" data-action="save-market-data-key">Save API key</button></div>
         </div>
       </section>
       ${categorySettings("investment", "Investment categories")}
@@ -984,6 +986,18 @@ function validateWorkbook() {
 async function saveWorkbook(exitAfterSave = false) {
   captureWorkbookSheet();
   validateWorkbook();
+  const savedInvestments = new Map(state.data.investments.map((item) => [item.id, item]));
+  workbookDraft.investments = workbookDraft.investments.map((item) => {
+    const normalized = { ...item, symbol: normalizeMarketSymbol(item.symbol) };
+    const previous = savedInvestments.get(item.id);
+    delete normalized.buyPrice;
+    delete normalized.currentValue;
+    if (normalizeMarketSymbol(previous?.symbol) !== normalized.symbol) {
+      delete normalized.currentPrice;
+      delete normalized.priceUpdatedAt;
+    }
+    return normalized;
+  });
   await replaceWorkbookData(workbookDraft);
   workbookDirty = false;
   workbookDraft = null;
@@ -1027,7 +1041,6 @@ const renderers = {
   transactions: renderTransactions,
   goals: renderGoals,
   plans: renderPlans,
-  cards: renderCards,
   strategy: renderStrategy,
   networth: renderNetWorth,
   spreadsheet: renderSpreadsheet,
@@ -1038,7 +1051,7 @@ function render() {
   document.body.classList.toggle("workbook-mode", state.route === "spreadsheet");
   pageTitle.textContent = routeTitles[state.route];
   document.querySelectorAll(".nav-item").forEach((item) => {
-    const activeRoute = ["transactions", "goals", "plans", "cards", "strategy", "networth", "spreadsheet", "settings"].includes(state.route) ? "more" : state.route;
+    const activeRoute = ["transactions", "goals", "plans", "strategy", "networth", "spreadsheet", "settings"].includes(state.route) ? "more" : state.route;
     item.classList.toggle("active", item.dataset.route === activeRoute);
     item.setAttribute("aria-current", item.dataset.route === activeRoute ? "page" : "false");
   });
@@ -1048,10 +1061,42 @@ function render() {
 
 function routeTo(route) {
   if (!renderers[route]) return;
+  const homeUrl = `${location.pathname}${location.search}`;
+  if (route === "home") {
+    const canReturnToHome = state.route !== "home" && history.state?.appRoute === state.route;
+    if (canReturnToHome) history.back();
+    else history.replaceState({ appRoute: "home" }, "", homeUrl);
+    workbookDraft = null;
+    workbookDirty = false;
+    activeWorkbookCell = null;
+    state.route = "home";
+    if (state.settings) render();
+    return;
+  }
+
+  const routeUrl = `${homeUrl}#${route}`;
+  if (state.route === "home") history.pushState({ appRoute: route }, "", routeUrl);
+  else history.replaceState({ appRoute: route }, "", routeUrl);
   state.route = route;
-  history.replaceState(null, "", route === "home" ? location.pathname : `#${route}`);
   if (!state.settings) return;
   render();
+  if (route === "investments") refreshInvestmentPrices({ silent: true }).catch(console.error);
+}
+
+function handleHistoryNavigation() {
+  const requestedRoute = location.hash.slice(1);
+  const route = renderers[requestedRoute] ? requestedRoute : "home";
+  if (state.route === "spreadsheet" && route !== "spreadsheet" && workbookDirty && !confirm("Exit workbook without saving your changes?")) {
+    history.forward();
+    return;
+  }
+  if (route !== "spreadsheet") {
+    workbookDraft = null;
+    workbookDirty = false;
+    activeWorkbookCell = null;
+  }
+  state.route = route;
+  if (state.settings) render();
 }
 
 function field(name, label, type = "text", value = "", options = {}) {
@@ -1119,31 +1164,31 @@ function openInvestmentForm(item = {}) {
     ${field("name", "Investment name", "text", item.name, { required: true, full: true })}
     ${selectField("categoryId", "Category", categoryOptions("investment", item.categoryId))}
     ${selectField("accountId", "Account", accountOptions(item.accountId))}
+    ${field("symbol", "Market symbol", "text", item.symbol, { full: true, placeholder: "RELIANCE:NSE" })}
     ${field("quantity", "Quantity", "number", item.quantity, { min: 0, step: "any" })}
-    ${field("buyPrice", "Buy price", "number", item.buyPrice, { min: 0, step: "0.01" })}
     ${field("investedAmount", "Invested amount", "number", item.investedAmount, { min: 0, step: "0.01" })}
-    ${field("currentPrice", "Current price", "number", item.currentPrice, { min: 0, step: "0.01" })}
-    ${field("currentValue", "Current value", "number", item.currentValue, { min: 0, step: "0.01" })}
     ${field("purchaseDate", "Purchase date", "date", item.purchaseDate || today(), { required: true })}
     ${textArea("notes", "Notes", item.notes)}
   `, async (formData) => {
+    const symbol = normalizeMarketSymbol(formValue(formData, "symbol"));
     const raw = {
       ...item,
       id: item.id || createId("investment"),
       name: formValue(formData, "name"),
       categoryId: formValue(formData, "categoryId"),
       accountId: formValue(formData, "accountId"),
+      symbol,
       quantity: Number(formValue(formData, "quantity")),
-      buyPrice: Number(formValue(formData, "buyPrice")),
       investedAmount: Number(formValue(formData, "investedAmount")),
-      currentPrice: Number(formValue(formData, "currentPrice")),
-      currentValue: Number(formValue(formData, "currentValue")),
       purchaseDate: formValue(formData, "purchaseDate"),
       notes: formValue(formData, "notes")
     };
-    const values = investmentValues(raw);
-    raw.investedAmount = values.investedAmount;
-    raw.currentValue = values.currentValue;
+    delete raw.buyPrice;
+    delete raw.currentValue;
+    if (normalizeMarketSymbol(item.symbol) !== symbol) {
+      delete raw.currentPrice;
+      delete raw.priceUpdatedAt;
+    }
     await putOne("investments", raw);
     await createNetWorthSnapshot();
   });
@@ -1259,6 +1304,7 @@ function openCardForm(item = {}) {
     ${selectField("icon", "Card icon", iconOptions)}
     ${selectField("status", "Status", selectOptions(["Current", "Future"], item.status || "Current"))}
     ${selectField("bankId", "Linked bank", bankOptions(item.bankId), true)}
+    ${field("creditLimit", "Credit limit", "number", item.creditLimit, { min: 0, step: "0.01" })}
     ${field("purpose", "Purpose and benefits", "text", item.purpose, { full: true })}
     ${textArea("notes", "Notes", item.notes)}
   `, async (formData) => {
@@ -1269,6 +1315,7 @@ function openCardForm(item = {}) {
       icon: formValue(formData, "icon"),
       status: formValue(formData, "status"),
       bankId: formValue(formData, "bankId"),
+      creditLimit: Number(formValue(formData, "creditLimit")),
       bank: "",
       purpose: formValue(formData, "purpose"),
       notes: formValue(formData, "notes")
@@ -1566,7 +1613,7 @@ function exportCsv() {
     item.name,
     categoryName(item.categoryId),
     accountName(item.accountId),
-    item.currentValue,
+    investmentValues(item).currentValue,
     item.notes
   ]));
   downloadFile(`my-wealth-export-${today()}.csv`, rows.map((row) => row.map(csvCell).join(",")).join("\r\n"), "text/csv;charset=utf-8");
@@ -1577,6 +1624,52 @@ async function saveSettings(patch) {
   state.settings = { ...state.settings, ...patch };
   await putOne("settings", state.settings);
   applyAppearance();
+}
+
+async function refreshInvestmentPrices({ force = false, silent = false } = {}) {
+  if (priceRefreshPromise) return priceRefreshPromise;
+  const apiKey = state.settings.marketDataApiKey;
+  if (!apiKey) {
+    if (!silent) throw new Error("Add your Twelve Data API key in Settings first.");
+    return;
+  }
+
+  const now = Date.now();
+  const candidates = state.data.investments.filter((item) => {
+    if (!normalizeMarketSymbol(item.symbol)) return false;
+    const updatedAt = Date.parse(item.priceUpdatedAt || "");
+    return force || !Number.isFinite(updatedAt) || now - updatedAt >= PRICE_CACHE_DURATION;
+  });
+  if (!candidates.length) {
+    if (!silent) showToast("Investment prices are already current.");
+    return;
+  }
+
+  priceRefreshPromise = (async () => {
+    const symbols = [...new Set(candidates.map((item) => normalizeMarketSymbol(item.symbol)))].slice(0, 8);
+    const prices = await fetchLatestPrices(symbols, apiKey);
+    const priceUpdatedAt = new Date().toISOString();
+    let updated = 0;
+    for (const item of state.data.investments) {
+      const symbol = normalizeMarketSymbol(item.symbol);
+      const currentPrice = prices.get(symbol);
+      if (!currentPrice) continue;
+      const next = { ...item, symbol, currentPrice, priceUpdatedAt };
+      delete next.currentValue;
+      delete next.buyPrice;
+      await putOne("investments", next);
+      updated += 1;
+    }
+    await loadState();
+    if (["home", "investments", "networth"].includes(state.route)) render();
+    if (!silent) showToast(`${updated} investment price${updated === 1 ? "" : "s"} updated.`);
+  })();
+
+  try {
+    await priceRefreshPromise;
+  } finally {
+    priceRefreshPromise = null;
+  }
 }
 
 dialogForm.addEventListener("submit", async (event) => {
@@ -1806,6 +1899,12 @@ main.addEventListener("click", async (event) => {
     if (action === "export-readable-backup" && confirm("Export an unencrypted JSON backup? Anyone with the file can read all financial data.")) await exportLegacyBackup();
     if (action === "import-backup") backupInput.click();
     if (action === "export-csv" && confirm("Export an unencrypted CSV? Anyone with the file can read its financial data.")) exportCsv();
+    if (action === "save-market-data-key") {
+      const apiKey = main.querySelector("#market-data-api-key")?.value.trim() || "";
+      await saveSettings({ marketDataApiKey: apiKey });
+      showToast(apiKey ? "Market data API key saved on this device." : "Market data API key removed.");
+    }
+    if (action === "refresh-prices") await refreshInvestmentPrices({ force: true });
     if (action === "snapshot") {
       await createNetWorthSnapshot();
       await loadState();
@@ -1954,10 +2053,7 @@ spreadsheetInput.addEventListener("change", async () => {
   }
 });
 
-window.addEventListener("hashchange", () => {
-  const route = location.hash.slice(1);
-  if (renderers[route]) routeTo(route);
-});
+window.addEventListener("popstate", handleHistoryNavigation);
 
 document.addEventListener("visibilitychange", () => {
   document.body.classList.toggle("app-private", document.hidden);
@@ -1969,7 +2065,15 @@ async function start() {
     await loadState();
     const initialRoute = location.hash.slice(1);
     state.route = renderers[initialRoute] ? initialRoute : "home";
+    const homeUrl = `${location.pathname}${location.search}`;
+    if (state.route === "home") {
+      history.replaceState({ appRoute: "home" }, "", homeUrl);
+    } else if (history.state?.appRoute !== state.route) {
+      history.replaceState({ appRoute: "home" }, "", homeUrl);
+      history.pushState({ appRoute: state.route }, "", `${homeUrl}#${state.route}`);
+    }
     render();
+    if (state.route === "investments") refreshInvestmentPrices({ silent: true }).catch(console.error);
 
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker.register("./service-worker.js").catch((error) => {

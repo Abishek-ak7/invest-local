@@ -1,6 +1,6 @@
 # My Wealth
 
-My Wealth is a frontend-only, offline-first personal finance Progressive Web App. It uses HTML, CSS, vanilla JavaScript, IndexedDB, and a service worker. There is no backend, account connection, analytics, or tracking.
+My Wealth is a frontend-only, offline-first personal finance Progressive Web App. It uses HTML, CSS, vanilla JavaScript, IndexedDB, and a service worker. There is no backend, account connection, analytics, or tracking. Live investment prices are requested directly from Twelve Data only after the user stores an API key locally.
 
 ## Run locally
 
@@ -37,11 +37,13 @@ The file is parsed entirely in the browser. Applying a valid file atomically rep
 
 The normal Home, Investments, Expenses, Accounts, and More pages are read-only views. Select the grid button in the top bar or open **More → Workbook editor** to enter the only data-editing mode.
 
-The full-screen workbook contains tabs for Accounts, Investments, Transactions, Liabilities, Goals, Plans, Plan Checks, Cards, Products, Categories, Banks, and Net Worth. Cell changes remain in one shared draft while switching tabs. Data sheets support direct editing, native copy and paste, an active-cell value bar, typed number/date fields, reference dropdowns, row creation, duplication, and deletion.
+Browser and device Back return from any section to Home before leaving the app. Navigating between sections keeps Home as the previous history entry.
+
+The full-screen workbook contains tabs for Accounts, Investments, Transactions, Liabilities, Goals, Plans, Plan Checks, Cards, Products, Categories, Banks, and Net Worth. Cell changes remain in one shared draft while switching tabs. Data sheets support direct editing, native copy and paste, an active-cell value bar, typed number/date fields, reference dropdowns, row creation, duplication, and deletion. An investment needs a market symbol, quantity, and invested amount; current price and current value are not entered manually.
 
 **Save** validates and atomically commits every sheet while keeping the workbook open. **Save & exit** commits all sheets and returns to the read-only dashboard. **Exit** discards unsaved changes after confirmation. Invalid rows leave all existing app data unchanged.
 
-The required columns are `Include`, `RecordType`, `ExternalId`, and `Name`. Dates use `YYYY-MM-DD`; numeric cells must not contain formulas. The template includes the optional columns and examples for balances, quantities, prices, current values, transactions, PF contributions, and liabilities. Files are limited to 10 MB.
+The required columns are `Include`, `RecordType`, `ExternalId`, and `Name`. Dates use `YYYY-MM-DD`; numeric cells must not contain formulas. The template includes optional columns and examples for balances, market symbols, quantities, invested amounts, transactions, PF contributions, and liabilities. Files are limited to 10 MB.
 
 ## Bank directory
 
@@ -69,16 +71,22 @@ Use the workbook **Categories** sheet to add, rename, or delete investment categ
 
 Current allocation is calculated automatically from investment holdings and appears in the dashboard and Investments page. Investment categories contain no target or manual actual-amount fields. Cash, Bonds, Foreign Stocks, and ETFs remain separate categories. Chart colors are assigned automatically.
 
+Net worth is calculated as bank-account balances plus current investment values minus remaining liabilities. Add a free Twelve Data API key in Settings, then use provider symbols such as `RELIANCE:NSE` in the Investments sheet. Opening Investments refreshes quotes older than 15 minutes, and **Refresh prices** requests an immediate update. Current value is calculated as quantity × fetched price. The last successful quote remains stored for offline use; until the first quote arrives, the invested amount is used so net worth does not disappear.
+
+The API key stays in this browser's IndexedDB and is excluded from all backup exports. Quote requests send only market symbols to Twelve Data; account names, balances, invested amounts, and other financial records remain local.
+
+The dashboard Liabilities card shows remaining debt and combined monthly payments, with a link to the detailed liability view.
+
 ## Monthly checklist and streaks
 
 Open **More → Monthly plan** to view recurring transfer or investment tasks and completion history. Edit tasks in the workbook **Plans** sheet and monthly completion records in **Plan Checks**.
 
-## Cards and investment products
+## Accounts, cards, and investment products
 
-- **More → Cards** tracks current and future cards, their linked bank, intended benefit, and a selectable purpose icon. Existing cards without a selected icon receive one automatically from their name or purpose.
+- **Accounts** displays bank accounts and credit cards in separate sections. Credit cards show their linked bank and credit limit.
 - **More → Investment plan** tracks funds, ETFs, stocks, metals, debt, cash, crypto, tickers, charges, monthly amounts, exposure, and status.
 
-Edit both sections through the workbook **Cards** and **Products** sheets.
+Edit these records through the workbook **Accounts**, **Cards**, and **Products** sheets.
 
 ## Liabilities
 

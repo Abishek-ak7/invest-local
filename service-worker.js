@@ -1,4 +1,4 @@
-const CACHE_NAME = "my-wealth-v42";
+const CACHE_NAME = "my-wealth-v47";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -7,6 +7,7 @@ const APP_SHELL = [
   "./js/app.js",
   "./js/db.js",
   "./js/calculations.js",
+  "./js/market-data.js",
   "./js/spreadsheet.js",
   "./icons/app-icon.svg"
 ];

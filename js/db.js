@@ -74,6 +74,7 @@ const defaultSettings = {
   id: "app",
   currency: "INR",
   locale: "en-IN",
+  marketDataApiKey: "",
   theme: "system",
   accent: "#176b5b",
   dashboardCards: {
@@ -83,6 +84,7 @@ const defaultSettings = {
     cash: true,
     goals: true,
     allocation: true,
+    liabilities: true,
     recentTransactions: true
   },
   categoriesInitialized: true,
@@ -222,7 +224,13 @@ export async function clearAllData() {
 }
 
 export async function exportAllData() {
-  const entries = await Promise.all(STORES.map(async (store) => [store, await getAll(store)]));
+  const entries = await Promise.all(STORES.map(async (store) => {
+    const records = await getAll(store);
+    if (store === "settings") {
+      return [store, records.map(({ marketDataApiKey, ...record }) => record)];
+    }
+    return [store, records];
+  }));
   return {
     app: "My Wealth",
     version: 3,

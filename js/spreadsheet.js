@@ -10,11 +10,9 @@ const HEADER = [
   "Date",
   "Amount",
   "Balance",
+  "MarketSymbol",
   "Quantity",
-  "BuyPrice",
   "InvestedAmount",
-  "CurrentPrice",
-  "CurrentValue",
   "PrincipalAmount",
   "InterestRate",
   "DurationMonths",
@@ -26,11 +24,11 @@ const HEADER = [
 export const SPREADSHEET_HEADERS = Object.freeze([...HEADER]);
 
 const TEMPLATE_ROWS = [
-  ["No", "Account", "bank-savings-1", "Main savings", "SBI", "", "Bank account", "", "", "", "125000", "", "", "", "", "", "", "", "", "", "INR", "Change Include to Yes"],
-  ["No", "Investment", "holding-1", "Example equity fund", "Your broker", "bank-savings-1", "Indian Equity Funds", "", "2025-01-01", "", "", "10", "8000", "80000", "9000", "90000", "", "", "", "", "INR", "Change Include to Yes"],
-  ["No", "Transaction", "txn-1", "Grocery purchase", "SBI", "bank-savings-1", "Food / Snacks", "Expense", "2026-10-01", "1250", "", "", "", "", "", "", "", "", "", "", "INR", "Change Include to Yes"],
-  ["No", "PF", "pf-1", "Provident Fund", "EPFO", "", "Provident Fund", "", "2020-01-01", "", "", "1", "", "180000", "", "210000", "", "", "", "", "INR", "Change Include to Yes"],
-  ["No", "Liability", "loan-1", "Home loan", "Your lender", "", "", "", "", "", "", "", "", "", "", "", "300000", "8.5", "240", "15000", "INR", "PrincipalAmount is current outstanding balance"]
+  ["No", "Account", "bank-savings-1", "Main savings", "SBI", "", "Bank account", "", "", "", "125000", "", "", "", "", "", "", "", "INR", "Change Include to Yes"],
+  ["No", "Investment", "holding-1", "Reliance Industries", "Your broker", "bank-savings-1", "Indian Stocks", "", "2025-01-01", "", "", "RELIANCE:NSE", "10", "12000", "", "", "", "", "INR", "Change Include to Yes"],
+  ["No", "Transaction", "txn-1", "Grocery purchase", "SBI", "bank-savings-1", "Food / Snacks", "Expense", "2026-10-01", "1250", "", "", "", "", "", "", "", "", "INR", "Change Include to Yes"],
+  ["No", "PF", "pf-1", "Provident Fund", "EPFO", "", "Provident Fund", "", "2020-01-01", "", "", "", "1", "180000", "", "", "", "", "INR", "Change Include to Yes"],
+  ["No", "Liability", "loan-1", "Home loan", "Your lender", "", "", "", "", "", "", "", "", "", "300000", "8.5", "240", "15000", "INR", "PrincipalAmount is current outstanding balance"]
 ];
 
 const RECORD_STORES = {
@@ -215,18 +213,15 @@ export async function parseSpreadsheet(text, categories, sourceName = "spreadshe
         import: metadata(externalId)
       });
     } else if (recordType === "investment" || recordType === "pf") {
-      const currentValue = numberValue(row, headerMap.currentvalue, line, { minimum: 0 });
-      const investedAmount = numberValue(row, headerMap.investedamount, line, { minimum: 0, defaultValue: currentValue });
+      const investedAmount = numberValue(row, headerMap.investedamount, line, { minimum: 0 });
       recordsByStore.investments.push({
         id: await stableId("investment", externalId),
         name,
         categoryId: recordType === "pf" ? "inv-pf" : resolveCategory(categories, "investment", row[headerMap.category], "inv-other", line),
         accountId,
+        symbol: clean(row[headerMap.marketsymbol], 64).toUpperCase(),
         quantity: numberValue(row, headerMap.quantity, line, { minimum: 0, defaultValue: recordType === "pf" ? 1 : 0 }),
-        buyPrice: numberValue(row, headerMap.buyprice, line, { minimum: 0 }),
         investedAmount,
-        currentPrice: numberValue(row, headerMap.currentprice, line, { minimum: 0, defaultValue: recordType === "pf" ? currentValue : 0 }),
-        currentValue,
         purchaseDate: dateValue(row, headerMap.date, line, today),
         notes: notes || institution,
         currency,
