@@ -131,7 +131,7 @@ const WORKBOOK_SHEETS = [
     { key: "id", label: "ID", required: true }, { key: "name", label: "Plan item", required: true }, { key: "categoryId", label: "Category", options: workbookSelects.investmentCategory }, { key: "amount", label: "Monthly amount", type: "number" }, { key: "purpose", label: "Purpose" }
   ] },
   { id: "planCompletions", label: "Plan Checks", icon: "✓", prefix: "completion", columns: [
-    { key: "id", label: "ID", required: true }, { key: "planId", label: "Plan", options: workbookSelects.plan, required: true }, { key: "month", label: "Month", type: "month", required: true }, { key: "status", label: "Status", values: ["Completed", "Skipped"], default: "Completed" }, { key: "completedAt", label: "Completed at", type: "datetime-local" }
+    { key: "id", label: "ID", required: true }, { key: "planId", label: "Plan", options: workbookSelects.plan, required: true }, { key: "month", label: "Month", type: "month", required: true }, { key: "status", label: "Status", values: ["Completed", "Partial", "Skipped"], default: "Completed" }, { key: "amount", label: "Partial amount", type: "number" }, { key: "completedAt", label: "Completed at", type: "datetime-local" }
   ] },
   { id: "cards", label: "Cards", icon: "▣", prefix: "card", columns: [
     { key: "id", label: "ID", required: true }, { key: "name", label: "Card", required: true }, { key: "icon", label: "Icon" }, { key: "status", label: "Status", values: ["Current", "Future"], default: "Current" }, { key: "bankId", label: "Bank", options: workbookSelects.bank }, { key: "creditLimit", label: "Credit limit", type: "number" }, { key: "purpose", label: "Purpose" }, { key: "notes", label: "Notes" }
@@ -387,43 +387,6 @@ function goalsMarkup(limit) {
   }).join("")}</div>`;
 }
 
-function monthlyInvestmentStatusMarkup(status, month) {
-  if (!status.target) {
-    return `<div class="monthly-plan-empty">Add monthly plan amounts to compare planned and actual investments by category.</div>`;
-  }
-
-  const pendingMessage = status.pendingItems.length
-    ? `<strong>${status.pendingItems.length} ${status.pendingItems.length === 1 ? "category is" : "categories are"} pending this month.</strong><span>${status.pendingItems.map((item) => `${item.name} ${formatMoney(item.pending)}`).join(" · ")}</span>`
-    : `<strong>All planned categories are complete for this month.</strong>`;
-
-  const allAnswered = allCategoriesResolved(month);
-  const monthlyStreak = allAnswered ? monthlyCompletionStreak(month) : 0;
-  const responseSummary = allAnswered
-    ? monthlyStreak
-      ? `<div class="monthly-streak">${monthlyStreak} month completion streak</div>`
-      : `<div class="monthly-streak muted">All categories answered. Not-added categories do not extend the completion streak.</div>`
-    : `<div class="monthly-streak muted">Respond to each pending category. Every choice saves immediately.</div>`;
-
-  return `<div class="monthly-plan-status">
-    <div class="monthly-plan-notice ${status.pendingItems.length ? "pending" : "complete"}">${pendingMessage}</div>
-    ${responseSummary}
-    <div class="monthly-plan-list">${status.items.map((item) => {
-      const response = monthlyCategoryResponse(item.categoryId, month);
-      const alreadyAdded = item.planned > 0 && item.pending <= 0 && response !== "Completed";
-      const completed = item.pending <= 0 || response === "Completed";
-      const streak = allAnswered && completed ? categoryCompletionStreak(item.categoryId, month) : 0;
-      const responseText = alreadyAdded ? "Already added this month" : response === "Skipped" ? "Not added this month" : allAnswered ? "Complete" : "Waiting for your response";
-      return `<div class="monthly-plan-item">
-        <div class="list-main"><strong>${escapeHtml(item.icon)} ${escapeHtml(item.name)}</strong><small>Planned ${formatMoney(item.planned)} · Actual ${formatMoney(item.actual)}</small>${item.planned > 0 ? `<small>${responseText}${streak ? ` · ${streak} month streak` : ""}</small>` : ""}</div>
-        ${item.planned > 0 && !alreadyAdded ? `<div class="monthly-response-controls" role="group" aria-label="${escapeHtml(`${item.name} monthly response`)}">
-          <button class="monthly-response-button complete ${response === "Completed" ? "selected" : ""}" data-monthly-response="Completed" data-category-id="${escapeHtml(item.categoryId)}" title="Added this month" aria-label="Mark ${escapeHtml(item.name)} added this month" aria-pressed="${response === "Completed"}">✓</button>
-          <button class="monthly-response-button skipped ${response === "Skipped" ? "selected" : ""}" data-monthly-response="Skipped" data-category-id="${escapeHtml(item.categoryId)}" title="Not added this month" aria-label="Mark ${escapeHtml(item.name)} not added this month" aria-pressed="${response === "Skipped"}">×</button>
-        </div>` : `<div class="list-value"><strong class="${alreadyAdded ? "positive" : ""}">${alreadyAdded ? "Complete" : "Not planned"}</strong></div>`}
-      </div>`;
-    }).join("")}</div>
-  </div>`;
-}
-
 function renderHome() {
   const month = currentMonth();
   const worth = netWorth(state.data.accounts, state.data.investments, state.data.liabilities);
@@ -431,7 +394,6 @@ function renderHome() {
   const profit = totalProfit(state.data.investments);
   const income = monthlyIncome(state.data.transactions, month);
   const investedThisMonth = monthlyInvestment(state.data.transactions, month);
-  const investmentPlanStatus = monthlyInvestmentPlanStatus(state.data.monthlyPlans, state.data.transactions, state.data.categories, month);
   const expenses = totalExpenses(state.data.transactions, month);
   const remaining = monthlyRemaining(state.data.transactions, month);
   const liabilitySummaries = state.data.liabilities.map((liability) => liabilityValues(liability));
@@ -456,7 +418,6 @@ function renderHome() {
         ${cardVisible("expenses") ? metric("Expenses", formatMoney(expenses), "negative") : ""}
         ${cardVisible("cash") ? metric("Remaining", formatMoney(remaining), remaining < 0 ? "negative" : "positive") : ""}
       </div>
-      ${monthlyInvestmentStatusMarkup(investmentPlanStatus, month)}
     </section>
     ${cardVisible("investments") ? `<section class="card span-4">
       <div class="section-header"><h2>Portfolio</h2><button class="text-button" data-route-link="investments">View all</button></div>
@@ -717,11 +678,6 @@ function planResponse(planId, month) {
   return state.data.planCompletions.find((entry) => entry.planId === planId && entry.month === month);
 }
 
-function planCompletion(planId, month) {
-  const response = planResponse(planId, month);
-  return response && (!response.status || response.status === "Completed") ? response : null;
-}
-
 function monthlyCategoryStatus(categoryId, month) {
   return monthlyInvestmentPlanStatus(state.data.monthlyPlans, state.data.transactions, state.data.categories, month)
     .items.find((item) => String(item.categoryId || "") === String(categoryId || ""));
@@ -743,25 +699,27 @@ function monthlyCategoryResponse(categoryId, month) {
   if (!plans.length) return "";
   const responses = plans.map((plan) => planResponse(plan.id, month));
   if (responses.some((response) => !response)) return "";
-  return responses.every((response) => !response.status || response.status === "Completed") ? "Completed" : "Skipped";
+  if (responses.every((response) => !response.status || response.status === "Completed")) return "Completed";
+  if (responses.every((response) => response.status === "Skipped")) return "Skipped";
+  if (responses.every((response) => response.status === "Partial")) return "Partial";
+  return "";
+}
+
+function monthlyCategoryResponseAmount(categoryId, month) {
+  return state.data.monthlyPlans
+    .filter((item) => String(item.categoryId || "") === String(categoryId || "") && Number(item.amount || 0) > 0)
+    .reduce((amount, plan) => Math.max(amount, Number(planResponse(plan.id, month)?.amount || 0)), 0);
+}
+
+function monthlyPendingItems(month) {
+  return monthlyInvestmentPlanStatus(state.data.monthlyPlans, state.data.transactions, state.data.categories, month)
+    .items.filter((item) => item.planned > 0 && item.pending > 0 && monthlyCategoryResponse(item.categoryId, month) !== "Skipped");
 }
 
 function offsetMonth(month, offset) {
   const [year, monthNumber] = month.split("-").map(Number);
   const date = new Date(year, monthNumber - 1 + offset, 1);
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
-}
-
-function planStreak(planId, endingMonth = currentMonth()) {
-  const plan = state.data.monthlyPlans.find((item) => item.id === planId);
-  if (!plan) return 0;
-  let streak = 0;
-  let month = endingMonth;
-  while (categoryMonthlyCompleted(plan.categoryId, month)) {
-    streak += 1;
-    month = offsetMonth(month, -1);
-  }
-  return streak;
 }
 
 function categoryCompletionStreak(categoryId, endingMonth = currentMonth()) {
@@ -788,34 +746,41 @@ function monthlyCompletionStreak(endingMonth = currentMonth()) {
 
 function renderPlans() {
   const month = state.filters.planMonth || currentMonth();
-  const completedPlans = state.data.monthlyPlans.filter((plan) => categoryMonthlyCompleted(plan.categoryId, month));
+  const status = monthlyInvestmentPlanStatus(state.data.monthlyPlans, state.data.transactions, state.data.categories, month);
+  const items = status.items.filter((item) => item.planned > 0);
+  const pendingItems = items.filter((item) => item.pending > 0 && monthlyCategoryResponse(item.categoryId, month) !== "Skipped");
   const answered = allCategoriesResolved(month);
-  const target = state.data.monthlyPlans.reduce((sum, plan) => sum + Number(plan.amount || 0), 0);
-  const completed = completedPlans.reduce((sum, plan) => sum + Number(plan.amount || 0), 0);
-  const percentage = target > 0 ? (completed / target) * 100 : 0;
+  const streak = answered ? monthlyCompletionStreak(month) : 0;
   main.className = "";
   main.innerHTML = `<section class="card">
     <div class="section-header"><div><p class="section-label">MONTHLY INVESTMENT CHECKLIST</p><h2>${formatDate(`${month}-01`).replace("1 ", "")}</h2></div><input class="month-picker" type="month" id="plan-month" value="${escapeHtml(month)}" aria-label="Plan month"></div>
-    <div class="progress"><span style="width:${percentage}%"></span></div>
+    <div class="progress"><span style="width:${status.percentage}%"></span></div>
     <div class="metric-grid">
-      ${metric("Target", formatMoney(target))}
-      ${metric("Completed", formatMoney(completed), "positive")}
-      ${metric("Pending", formatMoney(Math.max(target - completed, 0)), completed === target ? "positive" : "")}
-      ${metric("Progress", `${percentage.toFixed(1)}%`)}
+      ${metric("Planned", formatMoney(status.target))}
+      ${metric("Actual", formatMoney(status.actual), "positive")}
+      ${metric("Pending", formatMoney(pendingItems.reduce((sum, item) => sum + item.pending, 0)), pendingItems.length ? "negative" : "positive")}
+      ${metric("Progress", `${status.percentage.toFixed(1)}%`)}
     </div>
+    <div class="monthly-plan-notice ${pendingItems.length ? "pending" : "complete"}">${pendingItems.length
+      ? `<strong>${pendingItems.length} ${pendingItems.length === 1 ? "category needs" : "categories need"} your response.</strong><span>Choose Already done, enter a Partial amount, or mark Not needed this month.</span>`
+      : `<strong>${streak ? `${streak} month completion streak.` : "No pending responses for this month."}</strong>`}</div>
   </section>
   <section class="card">
-    <div class="section-header"><h2>Plan items</h2></div>
-    <div class="list">${state.data.monthlyPlans.length ? state.data.monthlyPlans.map((plan) => {
-      const done = categoryMonthlyCompleted(plan.categoryId, month);
-      const skipped = !done && planResponse(plan.id, month)?.status === "Skipped";
-      const streak = answered && done ? planStreak(plan.id, month) : 0;
-      return `<div class="list-item ${done ? "completed-item" : ""}">
-      <span class="completion-button ${done ? "complete" : skipped ? "skipped" : ""}" aria-label="${done ? "Completed" : skipped ? "Not added" : "Pending"}">${done ? "✓" : skipped ? "×" : ""}</span>
-      <div class="list-main"><strong>${escapeHtml(plan.name)}</strong><small>${escapeHtml(plan.purpose || categoryName(plan.categoryId))}</small><small>${streak ? `${streak} month streak` : skipped ? "Not added this month" : answered ? "No active streak" : "Awaiting all responses"}</small></div>
-      <div class="list-value"><strong>${formatMoney(plan.amount)}</strong><small>${done ? "Completed" : skipped ? "Not added" : "Pending"}</small></div>
-    </div>`;
-    }).join("") : emptyState("No monthly plan items yet.")}</div>
+    <div class="section-header"><h2>Categories</h2></div>
+    <div class="monthly-plan-list">${items.length ? items.map((item) => {
+      const response = monthlyCategoryResponse(item.categoryId, month);
+      const automaticallyDone = item.pending <= 0 && !response;
+      const categoryStreak = answered && item.pending <= 0 ? categoryCompletionStreak(item.categoryId, month) : 0;
+      const statusText = automaticallyDone ? "Already recorded" : response === "Completed" ? "Already done" : response === "Partial" ? `${formatMoney(monthlyCategoryResponseAmount(item.categoryId, month))} added · ${formatMoney(item.pending)} pending` : response === "Skipped" ? "Not needed this month" : `${formatMoney(item.pending)} pending`;
+      return `<div class="monthly-plan-item ${item.pending <= 0 ? "completed-item" : ""}">
+        <div class="list-main"><strong>${escapeHtml(item.icon)} ${escapeHtml(item.name)}</strong><small>Planned ${formatMoney(item.planned)} · Actual ${formatMoney(item.actual)}</small><small>${statusText}${categoryStreak ? ` · ${categoryStreak} month streak` : ""}</small></div>
+        ${automaticallyDone ? `<div class="list-value"><strong class="positive">Complete</strong></div>` : `<div class="monthly-choice-controls" role="group" aria-label="${escapeHtml(`${item.name} monthly status`)}">
+          <button class="monthly-choice-button ${response === "Completed" ? "selected complete" : ""}" data-monthly-response="Completed" data-category-id="${escapeHtml(item.categoryId)}" data-month="${escapeHtml(month)}">Already done</button>
+          <button class="monthly-choice-button ${response === "Partial" ? "selected partial" : ""}" data-monthly-response="Partial" data-category-id="${escapeHtml(item.categoryId)}" data-month="${escapeHtml(month)}">Partial amount</button>
+          <button class="monthly-choice-button ${response === "Skipped" ? "selected skipped" : ""}" data-monthly-response="Skipped" data-category-id="${escapeHtml(item.categoryId)}" data-month="${escapeHtml(month)}">Not needed this month</button>
+        </div>`}
+      </div>`;
+    }).join("") : emptyState("No monthly plan categories yet.")}</div>
   </section>`;
 }
 
@@ -1183,9 +1148,12 @@ const renderers = {
 function render() {
   document.body.classList.toggle("workbook-mode", state.route === "spreadsheet");
   pageTitle.textContent = routeTitles[state.route];
-  const streak = monthlyCompletionStreak(currentMonth());
-  streakCount.textContent = String(streak);
-  streakButton.title = streak ? `${streak} month investment streak` : "Check monthly investment streak";
+  const pendingCount = monthlyPendingItems(currentMonth()).length;
+  document.querySelector("#monthly-streak-symbol").textContent = pendingCount ? "◷" : "✓";
+  streakCount.textContent = String(pendingCount);
+  streakCount.hidden = pendingCount === 0;
+  streakButton.classList.toggle("pending", pendingCount > 0);
+  streakButton.title = pendingCount ? `${pendingCount} monthly ${pendingCount === 1 ? "category" : "categories"} pending` : "Monthly investments complete";
   streakButton.setAttribute("aria-label", streakButton.title);
   document.querySelectorAll(".nav-item").forEach((item) => {
     const activeRoute = ["transactions", "goals", "plans", "strategy", "networth", "spreadsheet", "settings"].includes(state.route) ? "more" : state.route;
@@ -1913,7 +1881,10 @@ document.querySelector(".bottom-nav").addEventListener("click", (event) => {
 });
 
 document.querySelector("#quick-add-button").addEventListener("click", () => routeTo("spreadsheet"));
-streakButton.addEventListener("click", () => routeTo("plans"));
+streakButton.addEventListener("click", () => {
+  state.filters.planMonth = currentMonth();
+  routeTo("plans");
+});
 
 themeToggleButton.addEventListener("click", async () => {
   const darkTheme = state.settings.theme === "dark" ||
@@ -1926,14 +1897,28 @@ themeToggleButton.addEventListener("click", async () => {
 main.addEventListener("click", async (event) => {
   const monthlyResponseButton = event.target.closest("[data-monthly-response]");
   if (monthlyResponseButton) {
-    const month = currentMonth();
+    const month = monthlyResponseButton.dataset.month || currentMonth();
     const categoryId = monthlyResponseButton.dataset.categoryId;
     const status = monthlyResponseButton.dataset.monthlyResponse;
+    if (status === "Partial") {
+      const item = monthlyCategoryStatus(categoryId, month);
+      const recordedAmount = monthlyCategoryResponseAmount(categoryId, month);
+      const maximum = recordedAmount + Number(item?.pending || 0);
+      openDialog("Record partial investment", `
+        <p class="field-full muted">Enter the amount added for ${escapeHtml(item?.name || categoryName(categoryId))}. It will remain pending until the planned amount is reached.</p>
+        ${field("amount", "Partial amount added", "number", recordedAmount || "", { required: true, min: 0.01, max: maximum, step: "0.01", full: true })}
+      `, async (formData) => {
+        const amount = Number(formValue(formData, "amount"));
+        await saveMonthlyPlanResponses(month, [{ categoryId, status, amount }], state.data.monthlyPlans, state.data.transactions, state.settings.currency);
+        return `${formatMoney(amount)} recorded. The remaining amount is still pending.`;
+      }, "Record partial amount");
+      return;
+    }
     try {
       await saveMonthlyPlanResponses(month, [{ categoryId, status }], state.data.monthlyPlans, state.data.transactions, state.settings.currency);
       await loadState();
-      renderHome();
-      showToast(status === "Completed" ? "Category completed and investment updated." : "Category marked not added this month.");
+      render();
+      showToast(status === "Completed" ? "Category marked already done." : "Category marked not needed this month.");
     } catch (error) {
       console.error(error);
       showToast(error.message || "Monthly response could not be saved.");
@@ -2006,28 +1991,6 @@ main.addEventListener("click", async (event) => {
     workbookDirty = false;
     activeWorkbookCell = null;
     routeTo("home");
-    return;
-  }
-
-  const planToggle = event.target.closest("[data-toggle-plan]");
-  if (planToggle) {
-    const planId = planToggle.dataset.togglePlan;
-    const month = planToggle.dataset.month;
-    const completion = planCompletion(planId, month);
-    if (completion) {
-      await deleteOne("planCompletions", completion.id);
-      showToast("Marked pending.");
-    } else {
-      await putOne("planCompletions", {
-        id: `${planId}-${month}`,
-        planId,
-        month,
-        completedAt: new Date().toISOString()
-      });
-      showToast("Completed. Streak updated.");
-    }
-    await loadState();
-    renderPlans();
     return;
   }
 

@@ -210,6 +210,7 @@ export async function saveMonthlyPlanResponses(month, responses, plans, transact
         planId: plan.id,
         month,
         status: response.status,
+        amount: response.status === "Partial" ? Number(response.amount || 0) : 0,
         respondedAt,
         completedAt: response.status === "Completed" ? respondedAt : ""
       });
@@ -239,6 +240,27 @@ export async function saveMonthlyPlanResponses(month, responses, plans, transact
       } else {
         transactionStore.delete(generatedId);
       }
+    } else if (response.status === "Partial") {
+      const planned = categoryPlans.reduce((sum, plan) => sum + Number(plan.amount || 0), 0);
+      const manualActual = transactions
+        .filter((item) => item.id !== generatedId && item.type === "Investment" && String(item.date || "").startsWith(month) && String(item.categoryId || "") === categoryId)
+        .reduce((sum, item) => sum + Number(item.amount || 0), 0);
+      const amount = Math.min(Math.max(Number(response.amount || 0), 0), Math.max(planned - manualActual, 0));
+      if (amount <= 0) throw new Error("Partial investment amount must be greater than zero.");
+      const [year, monthNumber] = month.split("-").map(Number);
+      const day = Math.min(new Date().getDate(), new Date(year, monthNumber, 0).getDate());
+      transactionStore.put({
+        id: generatedId,
+        type: "Investment",
+        date: `${month}-${String(day).padStart(2, "0")}`,
+        amount,
+        categoryId,
+        accountId: "",
+        description: "Partial monthly plan contribution",
+        notes: "Added from the Monthly plan checklist.",
+        currency: String(currency || "INR").toUpperCase(),
+        planResponse: { managed: true, month, categoryId }
+      });
     } else {
       transactionStore.delete(generatedId);
     }

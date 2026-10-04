@@ -177,6 +177,18 @@ button {
   font-weight: 800;
 }
 
+.streak-button.pending {
+  color: var(--warning);
+}
+
+.streak-button.pending small {
+  background: var(--warning);
+}
+
+.streak-button small[hidden] {
+  display: none;
+}
+
 main {
   display: grid;
   gap: 1rem;
@@ -383,21 +395,10 @@ body.workbook-mode main {
   color: var(--muted);
 }
 
-.monthly-plan-status,
-.monthly-plan-empty {
-  margin-top: 1rem;
-  padding-top: 1rem;
-  border-top: 1px solid var(--border);
-}
-
-.monthly-plan-empty {
-  color: var(--muted);
-  font-size: 0.85rem;
-}
-
 .monthly-plan-notice {
   display: grid;
   gap: 0.2rem;
+  margin-top: 1rem;
   padding: 0.75rem;
   border-left: 3px solid var(--positive);
   background: color-mix(in srgb, var(--positive) 8%, transparent);
@@ -444,39 +445,38 @@ body.workbook-mode main {
   text-align: right;
 }
 
-.monthly-streak {
-  margin-top: 0.75rem;
-  font-size: 0.82rem;
-  font-weight: 700;
-}
-
-.monthly-response-controls {
-  display: flex;
-  flex: 0 0 auto;
-  gap: 0.4rem;
-}
-
-.monthly-response-button {
+.monthly-choice-controls {
   display: grid;
-  width: 2rem;
-  height: 2rem;
-  padding: 0;
-  place-items: center;
+  flex: 0 1 29rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.35rem;
+}
+
+.monthly-choice-button {
+  min-height: 2.4rem;
+  padding: 0.4rem 0.55rem;
   border: 1px solid var(--border);
-  border-radius: 50%;
+  border-radius: 6px;
   background: var(--surface);
   color: var(--muted);
-  font-size: 1rem;
-  font-weight: 900;
+  font-size: 0.72rem;
+  font-weight: 800;
+  line-height: 1.2;
 }
 
-.monthly-response-button.complete.selected {
+.monthly-choice-button.complete.selected {
   border-color: var(--positive);
   background: var(--positive);
   color: white;
 }
 
-.monthly-response-button.skipped.selected,
+.monthly-choice-button.partial.selected {
+  border-color: var(--warning);
+  background: var(--warning);
+  color: white;
+}
+
+.monthly-choice-button.skipped.selected,
 .completion-button.skipped {
   border-color: var(--negative);
   background: var(--negative);
@@ -494,8 +494,9 @@ body.workbook-mode main {
     text-align: left;
   }
 
-  .monthly-response-controls {
+  .monthly-choice-controls {
     align-self: stretch;
+    grid-template-columns: 1fr;
   }
 }
 
